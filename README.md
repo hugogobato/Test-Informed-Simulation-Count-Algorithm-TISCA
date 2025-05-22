@@ -23,7 +23,7 @@ TISCA addresses a critical gap in simulation-based research: ensuring that studi
 
 ```R
 # Clone this repository
-git clone https://github.com/yourusername/tisca.git
+git clone https://github.com/hugogobato/Test-Informed-Simulation-Count-Algorithm-TISCA.git
 
 # Source the TISCA.R file in your R script
 source("path/to/TISCA.R")
@@ -35,7 +35,7 @@ A Python implementation of TISCA is also available, though it is currently in be
 
 ```python
 # Clone this repository
-git clone https://github.com/yourusername/tisca.git
+git clone https://github.com/hugogobato/Test-Informed-Simulation-Count-Algorithm-TISCA.git
 
 # Import the TISCA module in your Python script
 from tisca import run_tisca
