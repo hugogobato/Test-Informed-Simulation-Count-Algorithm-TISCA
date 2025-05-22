@@ -112,6 +112,10 @@ print(results$J_final)  # Final number of simulations required
 print(results$summary_table)  # Summary of results
 ```
 
+### Python Implementation
+
+See in this Github Repository in folder Usage_Examples/Synthetic_Data_Example_Python/ .
+
 ## Parameters
 
 The `run_tisca` function accepts the following parameters:
