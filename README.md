@@ -19,7 +19,7 @@ TISCA addresses a critical gap in simulation-based research: ensuring that studi
 
 ```R
 # Clone this repository
-git clone https://github.com/yourusername/tisca.git
+git clone https://github.com/hugogobato/Test-Informed-Simulation-Count-Algorithm-TISCA.git
 
 # Source the TISCA.R file in your R script
 source("path/to/TISCA.R")
@@ -208,13 +208,15 @@ The web application provides an interactive interface for researchers who may be
 If you use TISCA in your research, please cite:
 
 ```
-@misc{tisca2023,
-  author = {Author, A.},
-  title = {TISCA: Test-Informed Simulation Count Algorithm},
-  year = {2023},
-  publisher = {GitHub},
-  journal = {GitHub repository},
-  howpublished = {\url{https://github.com/yourusername/tisca}}
+@misc{https://doi.org/10.48550/arxiv.2409.05161,
+  doi = {10.48550/ARXIV.2409.05161},
+  url = {https://arxiv.org/abs/2409.05161},
+  author = {Souto,  Hugo Gobato and Neto,  Francisco Louzada},
+  keywords = {Methodology (stat.ME),  FOS: Computer and information sciences,  FOS: Computer and information sciences},
+  title = {Beyond Arbitrary Replications: A Principled Approach to Simulation Design in Causal Inference},
+  publisher = {arXiv},
+  year = {2024},
+  copyright = {Creative Commons Attribution Non Commercial Share Alike 4.0 International}
 }
 ```
 
