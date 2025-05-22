@@ -1,5 +1,7 @@
 # TISCA: Test-Informed Simulation Count Algorithm
 
+[![GitHub license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 ## Overview
 
 The Test-Informed Simulation Count Algorithm (TISCA) is a statistically rigorous framework for determining the optimal number of simulation replications needed in research studies. Instead of selecting an arbitrary number of simulations, TISCA iteratively runs simulations and performs statistical tests until a pre-specified power is achieved for detecting user-defined minimum detectable effect sizes.
@@ -17,15 +19,33 @@ TISCA addresses a critical gap in simulation-based research: ensuring that studi
 
 ## Installation
 
+### R Implementation
+
 ```R
 # Clone this repository
-git clone https://github.com/hugogobato/Test-Informed-Simulation-Count-Algorithm-TISCA.git
+git clone https://github.com/yourusername/tisca.git
 
 # Source the TISCA.R file in your R script
 source("path/to/TISCA.R")
 ```
 
+### Python Implementation (Beta)
+
+A Python implementation of TISCA is also available, though it is currently in beta phase:
+
+```python
+# Clone this repository
+git clone https://github.com/yourusername/tisca.git
+
+# Import the TISCA module in your Python script
+from tisca import run_tisca
+```
+
+**Note:** The Python implementation is still in beta testing and may have limitations compared to the R version. Additionally, the fine-tuned LLM available on the Streamlit website currently only supports the R implementation.
+
 ## Required Packages
+
+### For R Implementation
 
 TISCA depends on the following R packages:
 
@@ -34,9 +54,20 @@ TISCA depends on the following R packages:
 install.packages(c("stats", "utils", "progress", "ggplot2"))
 ```
 
+### For Python Implementation
+
+The Python version requires the following packages:
+
+```python
+# Install required packages
+pip install numpy pandas scipy tqdm matplotlib seaborn statsmodels
+```
+
 ## Basic Usage
 
-Here's a simple example of how to use TISCA:
+### R Implementation
+
+Here's a simple example of how to use TISCA in R:
 
 ```R
 # Source the TISCA.R file
@@ -202,6 +233,8 @@ We've created a companion web application to help researchers implement TISCA in
 - Assisting with debugging R code related to your TISCA implementation
 
 The web application provides an interactive interface for researchers who may be new to TISCA or need assistance with implementation details.
+
+**Note:** Currently, the fine-tuned LLM only supports the R implementation of TISCA. Support for the Python implementation is planned for future updates.
 
 ## Citation
 

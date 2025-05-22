@@ -1,0 +1,32 @@
+
+
+--- Running Example with Welch (Location Only) ---
+
+--- Original P-values (Welch) ---
+ mvbcf_tau_951_location_welch  mvbcf_tau_952_location_welch 
+                 0.3250321870                  0.5832764417 
+   mvbcf_pehe1_location_welch    mvbcf_pehe2_location_welch 
+                 0.0002641101                  0.0000926257 
+mvbart_tau_951_location_welch mvbart_tau_952_location_welch 
+                 0.2982256269                  0.0269317508 
+
+--- Adjusted P-values (Welch) ---
+                                bonferroni         holm           BH
+mvbcf_tau_951_location_welch  1.0000000000 0.8946768807 0.3900386244
+mvbcf_tau_952_location_welch  1.0000000000 0.8946768807 0.5832764417
+mvbcf_pehe1_location_welch    0.0015846606 0.0013205505 0.0007923303
+mvbcf_pehe2_location_welch    0.0005557542 0.0005557542 0.0005557542
+mvbart_tau_951_location_welch 1.0000000000 0.8946768807 0.3900386244
+mvbart_tau_952_location_welch 0.1615905045 0.1077270030 0.0538635015
+
+--- Significance (Welch, alpha=0.05) ---
+                              bonferroni  holm    BH
+mvbcf_tau_951_location_welch       FALSE FALSE FALSE
+mvbcf_tau_952_location_welch       FALSE FALSE FALSE
+mvbcf_pehe1_location_welch          TRUE  TRUE  TRUE
+mvbcf_pehe2_location_welch          TRUE  TRUE  TRUE
+mvbart_tau_951_location_welch      FALSE FALSE FALSE
+mvbart_tau_952_location_welch      FALSE FALSE FALSE
+
+--- Warnings (Welch) ---
+list()

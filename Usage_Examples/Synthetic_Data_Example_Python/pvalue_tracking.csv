@@ -1,0 +1,15 @@
+simulations,comparison,p_raw,p_adj
+10,proposed_pehe vs benchmark_pehe,0.1237387954318963,0.2474775908637926
+10,proposed_coverage vs benchmark_coverage,0.15176683792698265,0.2474775908637926
+20,proposed_pehe vs benchmark_pehe,0.020908233723923975,0.04181646744784795
+20,proposed_coverage vs benchmark_coverage,0.08237707193227334,0.08237707193227334
+30,proposed_pehe vs benchmark_pehe,0.0009643373734437071,0.0019286747468874141
+30,proposed_coverage vs benchmark_coverage,0.14091983476279785,0.14091983476279785
+40,proposed_pehe vs benchmark_pehe,2.540870163818173e-06,5.081740327636346e-06
+40,proposed_coverage vs benchmark_coverage,0.5772693719381536,0.5772693719381536
+50,proposed_pehe vs benchmark_pehe,1.5389915640080547e-08,3.0779831280161095e-08
+50,proposed_coverage vs benchmark_coverage,0.7968815098285056,0.7968815098285056
+60,proposed_pehe vs benchmark_pehe,1.76351363649716e-11,3.52702727299432e-11
+60,proposed_coverage vs benchmark_coverage,0.8549085675350518,0.8549085675350518
+70,proposed_pehe vs benchmark_pehe,2.663244018816251e-14,5.326488037632502e-14
+70,proposed_coverage vs benchmark_coverage,0.9543907622995841,0.9543907622995841

@@ -1,0 +1,13 @@
+"simulations","comparison","p_raw","p_adj"
+10,"proposed_pehe vs benchmark_pehe",0.000245909175147388,0.000491818350294777
+10,"proposed_coverage vs benchmark_coverage",0.104271101093607,0.104271101093607
+20,"proposed_pehe vs benchmark_pehe",6.3033615636131e-08,1.26067231272262e-07
+20,"proposed_coverage vs benchmark_coverage",0.0121267123349253,0.0121267123349253
+30,"proposed_pehe vs benchmark_pehe",3.66854539561697e-09,7.33709079123393e-09
+30,"proposed_coverage vs benchmark_coverage",0.0252941350175613,0.0252941350175613
+40,"proposed_pehe vs benchmark_pehe",9.22622533562936e-12,1.84524506712587e-11
+40,"proposed_coverage vs benchmark_coverage",0.118173000688057,0.118173000688057
+50,"proposed_pehe vs benchmark_pehe",2.55102333271155e-12,5.1020466654231e-12
+50,"proposed_coverage vs benchmark_coverage",0.277804622856427,0.277804622856427
+60,"proposed_pehe vs benchmark_pehe",3.77462702240872e-15,7.54925404481744e-15
+60,"proposed_coverage vs benchmark_coverage",0.171214680510449,0.171214680510449

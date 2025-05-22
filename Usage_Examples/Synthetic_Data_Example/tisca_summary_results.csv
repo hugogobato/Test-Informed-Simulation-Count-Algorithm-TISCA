@@ -1,0 +1,3 @@
+"Comparison","Proposed_Metric","Benchmark_Metric","MDE","Mean_Difference","Power","P_Value","Adjusted_P_Value","T_Statistic"
+"proposed_pehe vs benchmark_pehe","proposed_pehe","benchmark_pehe",-0.1,-0.230440457863932,0.902980514561072,3.77462702240872e-15,7.54925404481744e-15,-9.05852768206158
+"proposed_coverage vs benchmark_coverage","proposed_coverage","benchmark_coverage",0.05,0.015,0.974301551522603,0.171214680510449,0.171214680510449,1.37669910162635

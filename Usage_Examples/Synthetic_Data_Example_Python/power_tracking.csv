@@ -1,0 +1,15 @@
+simulations,comparison,power
+10,proposed_pehe vs benchmark_pehe,0.08602530708079714
+10,proposed_coverage vs benchmark_coverage,0.11957784723301361
+20,proposed_pehe vs benchmark_pehe,0.22868796941396452
+20,proposed_coverage vs benchmark_coverage,0.2714139494578497
+30,proposed_pehe vs benchmark_pehe,0.42684857281091976
+30,proposed_coverage vs benchmark_coverage,0.48846047276353183
+40,proposed_pehe vs benchmark_pehe,0.577609871007551
+40,proposed_coverage vs benchmark_coverage,0.562382061518569
+50,proposed_pehe vs benchmark_pehe,0.7592242260885836
+50,proposed_coverage vs benchmark_coverage,0.7247101191780356
+60,proposed_pehe vs benchmark_pehe,0.89748376446082
+60,proposed_coverage vs benchmark_coverage,0.8513944643598652
+70,proposed_pehe vs benchmark_pehe,0.9376974095695665
+70,proposed_coverage vs benchmark_coverage,0.917958521689527

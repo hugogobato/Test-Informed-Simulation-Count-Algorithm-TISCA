@@ -1,0 +1,18 @@
+mvbcf_tau_951 vs wsbcf_tau_951 
+[1] "Estimated Power (delta= 0.015 ) : 0.274"
+
+mvbcf_tau_952 vs wsbcf_tau_952 
+[1] "Estimated Power (delta= 0.015 ) : 0.352"
+
+mvbcf_tau_951 vs mvbart_tau_951 
+[1] "Estimated Power (delta= 0.015 ) : 0.498"
+
+mvbcf_tau_952 vs mvbart_tau_952 
+[1] "Estimated Power (delta= 0.015 ) : 0.49"
+
+mvbcf_pehe1 vs bcf_pehe1 
+[1] "Estimated Power (delta= 0.5 ) : 0.15"
+
+mvbcf_pehe2 vs bcf_pehe2 
+[1] "Estimated Power (delta= 0.5 ) : 0.192"
+
