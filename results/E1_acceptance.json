@@ -1,0 +1,12 @@
+{
+  "note": "P2-T3 acceptance (fixed oracle J=65, bivariate normal, rho=0)",
+  "Type_I_est": 0.0483,
+  "Type_I_nom": 0.05,
+  "Type_I_mcse": 0.0015,
+  "Type_I_ok": true,
+  "Power_est": 0.8029,
+  "Power_nom": 0.8,
+  "Power_mcse": 0.0028,
+  "Power_ok": true,
+  "PASS": true
+}

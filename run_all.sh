@@ -9,8 +9,10 @@
 # Environment expectation:
 #   - Python deps per environment.yml / requirements.txt (for the NumPy
 #     outer-MC harness E1, the R-independent part).
-#   - R packages from the P0-T4 library bundle on Google Colab, or renv on a
-#     local machine (see docs/seed_rng_protocol.md and README Repro section).
+#   - R packages from the P0-T4 library bundle on Google Colab, or
+#     `Rscript env/install_R_dependencies.R` on a local machine. Once the P0-T4
+#     bundle has been built, a real renv.lock is snapshotted from it and
+#     committed, and `renv::restore()` becomes the preferred path.
 
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -35,6 +37,18 @@ if [[ -f tisca/python/tisca/__init__.py ]]; then
   else
     echo "[run_all] no python interpreter found; skipping package import check"
   fi
+fi
+
+# 4) E1 / P2-T3: harness acceptance gate (bivariate normal, rho=0, oracle sigma
+#    -> Type I ~ 0.05 and power ~ 0.80, each within 2 MCSE). Suppresses pytest if
+#    absent; otherwise runs the focused acceptance test at reduced R for speed.
+if command -v python3 >/dev/null 2>&1; then
+  echo "[run_all] E1 harness acceptance (P2-T3)"
+  PYTHONPATH="$ROOT/tisca/python" \
+    python3 experiments/E1_operating_characteristics/run_e1.py --acceptance \
+    > results/E1_acceptance.json 2>&1 \
+    && echo "[run_all] E1 acceptance PASS (see results/E1_acceptance.json)" \
+    || { echo "[run_all] E1 acceptance FAILED"; cat results/E1_acceptance.json; exit 1; }
 fi
 
 echo "[run_all] skeleton OK. Experiment pipelines attach here as they land."
