@@ -256,7 +256,8 @@ make_stub <- function() {
     fit_seconds_bart2 = NA_real_, fit_seconds_mvbart = NA_real_,
     converged_flag = NA_integer_, error_message = NA_character_,
     hostname = NA_character_, git_sha = NA_character_,
-    session_hash = NA_character_, seq_phase = NA_character_
+    session_hash = NA_character_, seq_phase = NA_character_,
+    replication_seconds = NA_real_
   )
   models <- c("mvbcf", "bcf", "bart", "mvbart")
   meas <- c("pehe1","pehe2","bias1","bias2","ate1","ate2","crmse1","crmse2",
@@ -278,6 +279,7 @@ COL_NAMES <- names(STUB)
 #   out_path            : shard CSV to append this row to
 # -----------------------------------------------------------------------------
 run_one <- function(seed_emit, d_stream, f_stream, out_path) {
+  replication_start <- proc.time()[["elapsed"]]
   row <- STUB
   row[["seed"]] <- seed_emit
   row[["n"]] <- n_arg
@@ -315,6 +317,7 @@ run_one <- function(seed_emit, d_stream, f_stream, out_path) {
   if (is.null(p_mod)) {
     row[["converged_flag"]] <- 0L
     row[["error_message"]] <- paste0("propensity: ", ifelse(is.na(err_msg), "failed", err_msg))
+    row[["replication_seconds"]] <- as.numeric(proc.time()[["elapsed"]] - replication_start)
     append_csv_locked(as.data.frame(row, stringsAsFactors = FALSE)[COL_NAMES], out_path)
     return(invisible(NULL))
   }
@@ -558,6 +561,7 @@ run_one <- function(seed_emit, d_stream, f_stream, out_path) {
   row[["hostname"]] <- Sys.info()[["nodename"]]
   row[["git_sha"]] <- git_sha
   row[["session_hash"]] <- session_hash
+  row[["replication_seconds"]] <- as.numeric(proc.time()[["elapsed"]] - replication_start)
   df <- as.data.frame(row, stringsAsFactors = FALSE)[COL_NAMES]
   append_csv_locked(df, out_path)
   invisible(NULL)

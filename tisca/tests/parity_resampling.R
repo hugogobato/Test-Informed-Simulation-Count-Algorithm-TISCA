@@ -57,6 +57,24 @@ spec <- list(
   )
 )
 
+# A non-degenerate inclusion case.  The same row-resample matrix is passed to
+# R and Python, so p_mcs is compared numerically rather than only by its set.
+set.seed(2027)
+L_inc <- cbind(
+  m1 = rnorm(100, 0, 1),
+  m2 = rnorm(100, 0, 1) + 0.005,
+  m3 = rnorm(100, 0, 1) + 0.010
+)
+B_inc <- 199L
+idx_inc <- matrix(sample.int(nrow(L_inc), nrow(L_inc) * B_inc, replace = TRUE),
+                   nrow = nrow(L_inc), ncol = B_inc)
+spec$mcs$inclusion <- list(
+  L = L_inc, model_names = colnames(L_inc), B = B_inc, alpha = 0.05,
+  statistic = "Tmax", seed = 2027,
+  bootstrap_indices = unname(lapply(seq_len(nrow(idx_inc)), function(i)
+    as.integer(idx_inc[i, ] - 1L)))
+)
+
 writeLines(jsonlite::toJSON(spec, auto_unbox = TRUE), "parity_resampling_spec.json")
 
 ## ---- run the python evaluator ----------------------------------------
@@ -109,6 +127,26 @@ for (nm in names(spec$mcs)) {
   cat(sprintf("MCS %-8s R_kept=%s Py_kept=%s -> %s\n", nm,
               paste(r_kept, collapse=","), paste(py_kept, collapse=","),
               if (same) "OK" else "DIFFER"))
+
+  if (nm == "inclusion") {
+    idx0 <- matrix(unlist(cfg$bootstrap_indices), nrow = nrow(L), byrow = TRUE)
+    r_shared <- mcs(L, B = cfg$B, alpha = cfg$alpha, statistic = rstat,
+                    bootstrap_indices = idx0 + 1L)
+    shared_inc <- identical(sort(r_shared$included), sort(as.character(pyr$included)))
+    shared_exc <- identical(sort(r_shared$excluded), sort(as.character(pyr$excluded)))
+    p_r <- unname(r_shared$p_mcs[cfg$model_names])
+    p_py <- as.numeric(pyr$p_mcs)
+    p_ok <- length(p_r) == length(p_py) && max(abs(p_r - p_py)) <= 1e-8
+    nondegenerate <- length(r_shared$included) > 1L
+    ok <- shared_inc && shared_exc && p_ok && nondegenerate
+    n_checks <- n_checks + 1; if (ok) n_pass <- n_pass + 1
+    cat(sprintf("MCS inclusion shared sets/p_mcs R=(%s|%s) Py=(%s|%s) -> %s\n",
+                paste(sort(r_shared$included), collapse=","),
+                paste(sort(r_shared$excluded), collapse=","),
+                paste(sort(as.character(pyr$included)), collapse=","),
+                paste(sort(as.character(pyr$excluded)), collapse=","),
+                if (ok) "OK" else "DIFFER"))
+  }
 }
 
 ## ---- SPA / Reality check ----------------------------------------------

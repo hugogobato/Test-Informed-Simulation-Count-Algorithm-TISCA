@@ -68,10 +68,18 @@ def main():
         Loss = np.array(Ls["L"])  # (J, M)
         B = int(Ls["B"]); alpha = float(Ls["alpha"]); stat = Ls["statistic"]
         seed = int(Ls["seed"])
+        shared_idx = Ls.get("bootstrap_indices")
+        if shared_idx is not None:
+            shared_idx = np.asarray(shared_idx, dtype=int)
         r = mcs.mcs(Loss, B=B, alpha=alpha, statistic=stat, seed=seed,
-                    model_names=Ls.get("model_names"))
+                    model_names=Ls.get("model_names"),
+                    bootstrap_indices=shared_idx)
         results.setdefault("mcs", {})[name] = {
             "models_kept": list(r["included"]),
+            "included": list(r["included"]),
+            "excluded": list(r["excluded"]),
+            "p_H0": list(np.asarray(r["p_H0"], dtype=float)),
+            "p_mcs": list(np.asarray(r["p_mcs"], dtype=float)),
             "elimination_order": list(r["elimination_order"]),
             "elimination_pvalues": list(np.asarray(r["elimination_pvalues"], dtype=float)),
         }

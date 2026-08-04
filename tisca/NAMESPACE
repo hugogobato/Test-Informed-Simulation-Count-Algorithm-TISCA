@@ -49,6 +49,7 @@ export(reality_check)
 export(spa_test)
 export(spa_stat)
 export(mcs)
+export(GetD)
 
 export(validate_contrast)
 export(validate_family)

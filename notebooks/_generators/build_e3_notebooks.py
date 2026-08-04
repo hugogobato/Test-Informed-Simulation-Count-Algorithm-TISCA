@@ -1,359 +1,490 @@
 #!/usr/bin/env python3
-"""Generate the E3 MVBCF-case-study Colab notebooks (plan P3-T5[d] and P3-T5[e]).
+"""Generate the complete, pre-filled E3 Colab shard set.
 
-Produces two notebooks under Test-Informed-Simulation-Count-Algorithm-TISCA/
-notebooks/:
+The generated notebooks are ready to upload and run from top to bottom.  Each
+notebook describes exactly one cell and one contiguous seed range, so there is
+no operator configuration cell.  The shard manifest is written to
+``experiments/E3_mvbcf_casestudy/shard_table.csv`` and is the source of truth
+for collection and completeness checks.
 
-  E3_mvbcf_shard.ipynb
-      The parameterised worker for an E3 confirmatory/pilot shard. Cell 2 is the
-      ONLY cell the operator edits: one line per session setting SHARD_ID, DGP,
-      N, SEED_START, SEED_END, MC_CORES. Everything else is generic. It:
-        - installs R (apt) on the Colab runtime
-        - mounts Google Drive (checkpoint target, no shared filesystem)
-        - restores the P0-T4 R library bundle from a direct URL + SHA256
-        - downloads run_cell.R (this repo) and MVBCF_Code.cpp (the upstream,
-          read-only NVBCF repo) and sourceCpp's the cpp
-        - runs `Rscript run_cell.R <dgp> <n> <seed_start> <seed_end> --out <drive> \
-          --cores <MC_CORES> [--mode pilot|confirmatory]`
-        - appends every completed replication to a per-shard CSV on Drive
-          (one row per seed), so a killed 8-h session loses at most one row
-        - ends with the google.colab.files.download fallback per the user's rule
-
-  E3_round0_pilot_calibration.ipynb
-      The Round 0 pilot notebook that runs 50 pilot replications of DGP1/n=500
-      first (the only cell the P3-T5[e] calibration gate needs) and then
-      evaluates the calibrated stochtree::bcf benchmark against McJames et al.'s
-      published DGP1 n=500 Table 2. This gate BLOCKS every confirmatory shard.
-
-Each notebook cell source is stored as a Python list of lines. We build cell
-source with plain triple-quoted strings that NEVER contain a nested triple
-quote or an unescaped `!` inside an f-string literal (avoid f-strings).
+The R library bundle URL and SHA256 are generation-time arguments.  Before the
+bundle exists, ``--allow-unbuilt-bundle`` may be used to stage notebooks with a
+deliberately invalid sentinel.  Those notebooks fail loudly in their restore
+cell until a real bundle is baked in by regenerating the set.
 """
-import json, os, textwrap
 
-CELLS_A = []  # shared setup cells for both notebooks
-CELLS_B = []  # shard-run cells
-CELLS_C = []  # round-0 pilot + calibration cells
+from __future__ import annotations
 
-
-def md(cells, src):
-    cells.append({"cell_type": "markdown", "metadata": {}, "source": src.splitlines(keepends=True)})
-
-
-def code(cells, src):
-    cells.append({"cell_type": "code", "execution_count": None, "metadata": {},
-                  "outputs": [], "source": src.splitlines(keepends=True)})
+import argparse
+import csv
+import json
+import re
+import shutil
+import subprocess
+import textwrap
+from pathlib import Path
 
 
-# ---------------------------------------------------------------------------
-# Shared setup (both notebooks start identically)
-# ---------------------------------------------------------------------------
+UNBUILT_URL = "UNBUILT_BUNDLE_URL"
+UNBUILT_SHA = "UNBUILT_BUNDLE_SHA256"
+SPEEDUP = 1.62
+N500_MINUTES = 6.0
+N100_MINUTES = 2.0
 
-code(CELLS_A, textwrap.dedent("""\
-    import platform, subprocess
-    def _sh(cmd):
-        return subprocess.run(cmd, shell=True, capture_output=True, text=True).stdout.strip()
-    print("hostname :", platform.node() or "n/a")
-    print("os       :", platform.platform())
-    print("nproc    :", _sh("nproc"))
-    print("cpu      :", _sh("grep -m1 -E 'model name' /proc/cpuinfo") or "no /proc/cpuinfo")
-    print("ram:")
-    print(_sh("free -g") or "free unavailable")
-    """))
 
-code(CELLS_A, textwrap.dedent("""\
-    !apt-get -qq update > /dev/null
-    !apt-get -qq install -y --no-install-recommends r-base r-base-dev libcurl4-openssl-dev > /dev/null 2>&1
-    !R --version | head -1
-    print("R install done")
-    """))
+def md(cells, source):
+    cells.append({"cell_type": "markdown", "metadata": {},
+                  "source": source.splitlines(keepends=True)})
 
-code(CELLS_A, textwrap.dedent("""\
-    from google.colab import drive
-    drive.mount("/content/drive")
-    print("Drive mounted")
-    """))
 
-code(CELLS_A, textwrap.dedent("""\
-    import os, subprocess, urllib.request, hashlib
+def code(cells, source):
+    cells.append({"cell_type": "code", "execution_count": None,
+                  "metadata": {}, "outputs": [],
+                  "source": source.splitlines(keepends=True)})
 
-    # Paste the URL + SHA256 printed by the P0-T4 bundle notebook (Cell 7).
-    BUNDLE_URL     = "PASTE_BUNDLE_URL"      # direct link to tisca_rlib.tar.gz
-    BUNDLE_SHA256  = "PASTE_BUNDLE_SHA256"   # Cell 7 of P0T4_build_rlib_bundle.ipynb
-    assert BUNDLE_URL != "PASTE_BUNDLE_URL", "paste BUNDLE_URL"
-    assert BUNDLE_SHA256 != "PASTE_BUNDLE_SHA256", "paste BUNDLE_SHA256"
 
-    DEST = "/content"
-    LIBDIR = "/content/tisca_rlib/rlib"
-    DL = "/content/_dl_tisca_rlib.tar.gz"
-    urllib.request.urlretrieve(BUNDLE_URL, DL)
-    h = hashlib.sha256(open(DL, "rb").read()).hexdigest()
-    assert h == BUNDLE_SHA256, "SHA mismatch"
-    if os.path.exists(LIBDIR):
-        subprocess.run(["rm", "-rf", "/content/tisca_rlib"])
-    subprocess.run(["tar", "xzf", DL, "-C", DEST])
-    assert os.path.isdir(LIBDIR)
-    print("bundle restored:", LIBDIR)
-    print("tisca_rlib.rlib entries:", len(os.listdir(LIBDIR)))
-    """))
-
-code(CELLS_A, textwrap.dedent("""\
-    import os, subprocess, urllib.request
-
-    # run_cell.R lives in this repo; MVBCF_Code.cpp is the UPSTREAM file (the
-    # read-only NVBCF repo). We fetch both at runtime and never copy the .cpp
-    # into the TISCA repository (licensing/attribution rule, plan §0.1).
-    RUNCELL_URL = "https://raw.githubusercontent.com/hugogobato/Test-Informed-Simulation-Count-Algorithm-TISCA/main/experiments/E3_mvbcf_casestudy/run_cell.R"
-    MVBCF_CPP_URL = "https://raw.githubusercontent.com/Nathan-McJames/MVBCF_Paper/main/MVBCF_Code.cpp"
-
-    os.makedirs("/content/e3", exist_ok=True)
-    urllib.request.urlretrieve(RUNCELL_URL, "/content/e3/run_cell.R")
-    urllib.request.urlretrieve(MVBCF_CPP_URL, "/content/e3/MVBCF_Code.cpp")
-    assert os.path.getsize("/content/e3/run_cell.R") > 1000
-    assert os.path.getsize("/content/e3/MVBCF_Code.cpp") > 10000
-    print("run_cell.R :", os.path.getsize("/content/e3/run_cell.R"), "bytes")
-    print("MVBCF_Code.cpp :", os.path.getsize("/content/e3/MVBCF_Code.cpp"), "bytes")
-    """))
-
-code(CELLS_A, textwrap.dedent("""\
-    # Compile the upstream MVBCF C++ once, verify fast_bart() is exposed, and
-    # confirm the bundle satisfies Rcpp + RcppArmadillo + RcppDist. Compilation
-    # happens once per session (not per replication).
-    import subprocess, os
-    compile_r = (
-        '.libPaths(c("/content/tisca_rlib/rlib", .libPaths()))\\n' +
-        'if (!requireNamespace("Rcpp", quietly=TRUE) \\n' +
-        '    || !requireNamespace("RcppArmadillo", quietly=TRUE) \\n' +
-        '    || !requireNamespace("RcppDist", quietly=TRUE)) \\n' +
-        '  stop("bundle missing Rcpp/RcppArmadillo/RcppDist") \\n' +
-        'library(Rcpp) \\n' +
-        'sourceCpp("/content/e3/MVBCF_Code.cpp") \\n' +
-        'stopifnot(is.function(fast_bart)) \\n' +
-        'cat("FAST_BART_OK\\\\n") \\n'
-    )
-    with open("/content/e3/compile.R", "w") as f:
-        f.write(compile_r)
-    res = subprocess.run(["Rscript", "/content/e3/compile.R"], capture_output=True, text=True)
-    print(res.stdout[-3000:])
-    if res.returncode != 0 or "FAST_BART_OK" not in res.stdout:
-        print("STDERR:", res.stderr[-3000:])
-        raise SystemExit("Rcpp compilation of MVBCF_Code.cpp failed")
-    print("fast_bart() compiled and available")
-    """))
-
-# ---------------------------------------------------------------------------
-# E3 confirmatory / general shard: config + run
-# ---------------------------------------------------------------------------
-
-md(CELLS_B, textwrap.dedent("""\
-    ## E3 worker shard
-
-    **Edit Cell 2 (config) only.** One notebook = one session = one shard of the
-    MVBCF case-study re-run. `SEED_START`/`SEED_END` are the small per-master
-    replication indices for this shard (confirmatory 0..N-1; pilot 0..J0-1). The
-    shard table at the bottom of `REVISION_PLAN.md` §5 tells you which ranges to
-    assign. Size each shard for ~6 h of the 8-h budget.
-
-    Output rows are appended to `{DRIVE_DIR}/<cell>_<shardid>.csv` as each
-    replication completes; a 8-h kill loses at most one replication.
-    """))
-
-code(CELLS_B, textwrap.dedent("""\
-    # ================= CONFIG (edit this cell only) =================
-    SHARD_ID    = 1        # a short partition label, e.g. 0, 1, 2, ... (just for the filename)
-    DGP         = 1        # 1, 2, or 3
-    N           = 500      # training sample size: 100 or 500
-    SEED_START  = 0        # first replication index for this shard (inclusive)
-    SEED_END    = 9        # last replication index for this shard (inclusive)
-    MC_CORES    = 2        # Colab is 2 vCPUs; use 2 (plan P0-T3 measured SPEEDUP=1.62)
-    MODE        = "confirmatory"  # or "pilot"
-    # Directory on Drive where the shard CSV is stored (no shared filesystem;
-    # this is the checkpoint target and the source for concat/verification).
-    DRIVE_DIR   = "/content/drive/MyDrive/TISCA_E3"
-    # ==================================================================
-    import os
-    assert 1 <= DGP <= 3 and N in (100, 500)
-    assert 0 <= SEED_START <= SEED_END
-    assert MC_CORES >= 1
-    os.makedirs(DRIVE_DIR, exist_ok=True)
-    shard_tag = f"DGP{DGP}_n{N}_shard{SHARD_ID}"
-    out = os.path.join(DRIVE_DIR, f"{shard_tag}.csv")
-    print("shard        :", shard_tag)
-    print("mode         :", MODE)
-    print("seeds        :", SEED_START, "..", SEED_END)
-    print("out csv      :", out)
-    print("NOTE: `N` is already handled by run_cell.R via CLI arg; `N` above is "
-          "the training size for the DGP, and `n_test` is fixed at 1000 inside the driver.")
-    """))
-
-code(CELLS_B, textwrap.dedent("""\
-    import os, subprocess, time
-
-    env = dict(os.environ)
-    env["R_LIBS"] = LIBDIR + ":" + env.get("R_LIBS", "")
-    env["TISCA_MVBCF_CPP"] = "/content/e3/MVBCF_Code.cpp"
-    # R_REPOS directly; the bundle sets none. Keep R_LIBS to the bundle first.
-    cmd = [
-        "Rscript", "/content/e3/run_cell.R",
-        str(DGP), str(N), str(SEED_START), str(SEED_END),
-        "--out", out, "--cores", str(MC_CORES), "--mode", MODE,
-    ]
-    print("running:", " ".join(cmd))
-    t0 = time.time()
-    res = subprocess.run(cmd, env=env, capture_output=True, text=True)
-    wall = time.time() - t0
-    print(res.stdout[-6000:])
-    if res.returncode != 0:
-        print("STDERR tail:", res.stderr[-4000:])
-        raise SystemExit("run_cell failed")
-    print("wall-clock: %.1f min" % (wall / 60.0))
-    # one-line per-replication timing check (plan re-confirm of SPEEDUP on the
-    # real workload): rows already on Drive.
-    if os.path.exists(out):
-        nrows = sum(1 for _ in open(out)) - 1
-        print("rows on Drive so far:", max(nrows, 0))
-    """))
-
-code(CELLS_B, textwrap.dedent("""\
-    import os
-    if not os.path.exists(out):
-        raise SystemExit("shard CSV not produced: " + out)
-    import csv
-    with open(out) as f:
-        rows = list(csv.DictReader(f))
-    # Emitted `seed` labels differ by mode: confirmatory 0.., pilot 1_000_001..
-    emit_start = SEED_START if MODE != "pilot" else 1000000 + SEED_START + 1
-    expect = SEED_END - SEED_START + 1
-    got = set({int(r["seed"]) for r in rows if r.get("seed")})
-    missing = [emit_start + i for i in range(expect) if (emit_start + i) not in got]
-    print("expected rows in shard:", expect, "found unique seeds:", len(got))
-    print("missing seeds:", missing if missing else "none")
-    print("non-converged (converged_flag==0):", sum(1 for r in rows if r.get("converged_flag") == "0"))
-    print("shard CSV:", out, os.path.getsize(out), "bytes")
-    # Colab download fallback per the standing rule:
-    try:
-        from google.colab import files
-        files.download(out)
-        print("Downloaded shard CSV to local machine.")
-    except Exception as e:
-        print("(not on Colab / download skipped):", e)
-    """))
-
-# ---------------------------------------------------------------------------
-# Round 0 pilot + P3-T5(e) calibration gate
-# ---------------------------------------------------------------------------
-
-md(CELLS_C, textwrap.dedent("""\
-    ## Round 0 pilot + P3-T5(e) stochtree::bcf calibration gate
-
-    Run **DGP1 n=500 pilot first** (the only cell the calibration gate needs).
-    It is ~5 core-hours. If the calibrated-BCF configuration is wrong, you lose
-    one notebook, not four. After an acceptable calibration result, launch the
-    remaining pilots (DGP2/DGP3 n=500, DGP1 n=100) in their own shards.
-
-    The gate compares the 50-pilot means of the calibrated `bcf_*` columns to
-    McJames et al.'s published DGP1/n=500 Table 2. No confirmatory shard may run
-    until all four BCF rows are inside their pass bands (plan P3-T5[e]).
-    """))
-
-code(CELLS_C, textwrap.dedent("""\
-    import os
-    # Round 0 pilot: DGP1, n=500, 50 independent-seed pilot replications.
-    DRIVE_DIR = "/content/drive/MyDrive/TISCA_E3"
-    DGP, N, MC_CORES, MODE = 1, 500, 2, "pilot"
-    SEED_START, SEED_END = 0, 49
-    os.makedirs(DRIVE_DIR, exist_ok=True)
-    out = os.path.join(DRIVE_DIR, f"DGP1_n500_pilot.csv")
-    import subprocess, time
-    env = dict(os.environ)
-    env["R_LIBS"] = LIBDIR + ":" + env.get("R_LIBS", "")
-    env["TISCA_MVBCF_CPP"] = "/content/e3/MVBCF_Code.cpp"
-    cmd = ["Rscript", "/content/e3/run_cell.R", str(DGP), str(N),
-           str(SEED_START), str(SEED_END), "--out", out,
-           "--cores", str(MC_CORES), "--mode", MODE]
-    print("running:", " ".join(cmd))
-    t0 = time.time()
-    res = subprocess.run(cmd, env=env, capture_output=True, text=True)
-    print("wall-clock: %.1f min" % ((time.time() - t0) / 60.0))
-    print(res.stdout[-4000:])
-    if res.returncode != 0:
-        print("STDERR:", res.stderr[-3000:])
-        raise SystemExit("pilot failed")
-    """))
-
-code(CELLS_C, textwrap.dedent("""\
-    import csv, statistics as st
-    with open(out) as f:
-        rows = list(csv.DictReader(f))
-    n = len(rows)
-    if n < 30:
-        print("[FAIL] calibration needs >=50 pilot rows; got", n)
-    f1 = lambda key: [float(r[key]) for r in rows if r.get(key) not in (None, "")]
-    res = {}
-    for key in ["bcf_pehe1", "bcf_pehe2", "bcf_cov951", "bcf_cov952"]:
-        v = f1(key)
-        res[key] = (st.mean(v), st.stdev(v) / (len(v) ** 0.5), len(v)) if v else (float("nan"), float("nan"), 0)
-    print("=" * 72)
-    print("P3-T5(e) calibration gate vs McJames et al. DGP1 n=500 Table 2")
-    print("=" * 72)
-    targets = {
-        "bcf_pehe1": (9.63, 9.30, 10.00, "BCF PEHE Y1"),
-        "bcf_pehe2": (9.96, 9.60, 10.30, "BCF PEHE Y2"),
-        "bcf_cov951": (0.97, 0.95, 0.98, "BCF tau 95% cov Y1"),
-        "bcf_cov952": (0.96, 0.94, 0.98, "BCF tau 95% cov Y2"),
-    }
-    ok = True
-    for key, (mean, se, nn) in res.items():
-        tgt, lo, hi, label = targets[key]
-        inside = lo <= mean <= hi
-        ok = ok and inside
-        print(f"{label:>20}: mean={mean:.3f} se={se:.3f} target={tgt} band=[{lo},{hi}] -> {'OK' if inside else 'OUT OF BAND'}")
-    print("-" * 72)
-    print("VERDICT:", "PASS - proceed to confirmatory shards" if ok
-          else "FAIL - diagnose before launching confirmatory (plan P3-T5[e])")
-    """))
-
-code(CELLS_C, textwrap.dedent("""\
-    # P3-T5(f): compare fast_bart() vs mvbcf::run_mvbcf() on 10 identical seeds.
-    # Placeholder: run both on the same 10 pilot seeds and compare PEHE/coverage.
-    print("P3-T5(f) fast_bart-vs-mvbcf equivalence check: "
-          "see CALIBRATION.md; record outcome there.")
-    """))
-
-# ---------------------------------------------------------------------------
-# Assemble the two notebooks
-# ---------------------------------------------------------------------------
-def build(cells, kernel_py=True):
+def notebook(cells):
     return {
         "nbformat": 4,
         "nbformat_minor": 0,
-        "metadata": {"kernelspec": {"name": "python3", "display_name": "Python 3"},
-                      "language_info": {"name": "python"}},
+        "metadata": {
+            "kernelspec": {"name": "python3", "display_name": "Python 3"},
+            "language_info": {"name": "python"},
+        },
         "cells": cells,
     }
 
-ROOT = "/home/hugo_souto/Stuff/Submitted_Research/TISCA_paper/Test-Informed-Simulation-Count-Algorithm-TISCA/notebooks"
-os.makedirs(ROOT, exist_ok=True)
 
-# E3 shard notebook: shared setup + shard run cells
-nb_shard = build(CELLS_A + CELLS_B)
-# E3 round-0 pilot + calibration: shared setup + pilot cells
-nb_pilot = build(CELLS_A + CELLS_C)
+def _ranges(total, shard_size):
+    start = 0
+    while start < total:
+        end = min(total - 1, start + shard_size - 1)
+        yield start, end
+        start = end + 1
 
-def _sanity(cells, name):
-    for i, c in enumerate(cells):
-        src = "".join(c["source"])
-        assert not any(bad in src for bad in ["'''", '"""']), f"{name} cell {i} has forbidden triple-quote"
 
-_sanity(CELLS_A, "setup")
-_sanity(CELLS_B, "shard")
-_sanity(CELLS_C, "pilot")
+def build_shards():
+    rows = []
 
-p1 = os.path.join(ROOT, "E3_mvbcf_shard.ipynb")
-p2 = os.path.join(ROOT, "E3_round0_pilot_calibration.ipynb")
-with open(p1, "w") as f:
-    json.dump(nb_shard, f, indent=1)
-with open(p2, "w") as f:
-    json.dump(nb_pilot, f, indent=1)
-print("wrote", p1, len(CELLS_A) + len(CELLS_B), "cells")
-print("wrote", p2, len(CELLS_A) + len(CELLS_C), "cells")
+    def add_cell(dgp, n, mode, total, shard_size, shard_offset):
+        minutes = N500_MINUTES if n == 500 else N100_MINUTES
+        if mode == "confirmatory" and n == 100 and total == 1000:
+            ranges = [(0, 332), (333, 665), (666, 999)]
+        else:
+            ranges = _ranges(total, shard_size)
+        for local_id, (cli_start, cli_end) in enumerate(
+                ranges, start=shard_offset):
+            count = cli_end - cli_start + 1
+            if mode == "pilot":
+                seed_start = cli_start + 1_000_001
+                seed_end = cli_end + 1_000_001
+                round_name = "Round0"
+                seed_label = f"{seed_start}-{seed_end}"
+            else:
+                seed_start = cli_start
+                seed_end = cli_end
+                round_name = "Round1"
+                seed_label = f"{seed_start:03d}-{seed_end:03d}"
+            stem = (f"E3_DGP{dgp}_n{n}_{mode}_shard{local_id:02d}_"
+                    f"seeds{seed_label}")
+            rows.append({
+                "round": round_name,
+                "dgp": dgp,
+                "n": n,
+                "mode": mode,
+                "seed_start": seed_start,
+                "seed_end": seed_end,
+                "cli_seed_start": cli_start,
+                "cli_seed_end": cli_end,
+                "replication_count": count,
+                "projected_hours": f"{count * minutes / SPEEDUP / 60.0:.3f}",
+                "notebook_filename": stem + ".ipynb",
+                "output_filename": stem + ".csv",
+            })
+
+    # Round 0 is one ready-made notebook per pilot cell.  The pilot seed block
+    # is emitted by run_cell.R as 1,000,001 ... 1,000,050.
+    add_cell(1, 500, "pilot", 50, 50, 1)
+    add_cell(2, 500, "pilot", 50, 50, 1)
+    add_cell(3, 500, "pilot", 50, 50, 1)
+    add_cell(1, 100, "pilot", 50, 50, 1)
+
+    # Round 1 follows the plan budget: ten ~6-hour n=500 shards per cell and
+    # three ~6.8-hour n=100 shards for the 1000 confirmatory replications.
+    add_cell(1, 500, "confirmatory", 1000, 100, 1)
+    add_cell(2, 500, "confirmatory", 1000, 100, 1)
+    add_cell(3, 500, "confirmatory", 1000, 100, 1)
+    add_cell(1, 100, "confirmatory", 1000, 333, 1)
+
+    # Every cell has an independent contiguous range.  Pilot and confirmatory
+    # labels are intentionally disjoint because pilots carry the +1,000,001
+    # emitted seed block.
+    expected = {"pilot": 50, "confirmatory": 1000}
+    for key in {(r["dgp"], r["n"], r["mode"]) for r in rows}:
+        cell = sorted((r for r in rows
+                       if (r["dgp"], r["n"], r["mode"]) == key),
+                      key=lambda r: r["seed_start"])
+        assert cell[0]["seed_start"] == (1_000_001 if key[2] == "pilot" else 0)
+        for left, right in zip(cell, cell[1:]):
+            assert left["seed_end"] + 1 == right["seed_start"], key
+        assert sum(r["replication_count"] for r in cell) == expected[key[2]], key
+        assert cell[-1]["seed_end"] == (
+            1_000_000 + expected[key[2]] if key[2] == "pilot"
+            else expected[key[2]] - 1
+        )
+    assert len(rows) == 37, len(rows)
+    assert len({r["notebook_filename"] for r in rows}) == len(rows)
+    assert len({r["output_filename"] for r in rows}) == len(rows)
+    confirmatory = [r for r in rows if r["mode"] == "confirmatory"]
+    for index, row in enumerate(confirmatory):
+        row["account_slot"] = f"account{index // 3 + 1:02d}"
+        row["session_slot"] = f"session{index % 3 + 1}"
+    for index, row in enumerate((r for r in rows if r["mode"] == "pilot"), start=1):
+        row["account_slot"] = "round0"
+        row["session_slot"] = f"pilot{index}"
+    return rows
+
+
+def _bundle_args(parser):
+    parser.add_argument("--bundle-url", default=UNBUILT_URL,
+                        help="Direct URL for tisca_rlib.tar.gz.")
+    parser.add_argument("--bundle-sha256", default=UNBUILT_SHA,
+                        help="SHA256 of the R library bundle.")
+    parser.add_argument("--allow-unbuilt-bundle", action="store_true",
+                        help="Stage notebooks with the unbuilt-bundle sentinel.")
+
+
+def _validated_bundle(args):
+    unbuilt = args.bundle_url == UNBUILT_URL or args.bundle_sha256 == UNBUILT_SHA
+    if unbuilt and not args.allow_unbuilt_bundle:
+        raise SystemExit(
+            "The R bundle is not built. Supply --bundle-url and --bundle-sha256, "
+            "or explicitly pass --allow-unbuilt-bundle to stage failing notebooks."
+        )
+    if unbuilt:
+        print("WARNING: staging with an unbuilt-bundle sentinel; every notebook "
+              "will stop in its bundle assertion cell.")
+        return UNBUILT_URL, UNBUILT_SHA
+    if not re.fullmatch(r"https?://.+", args.bundle_url):
+        raise SystemExit("--bundle-url must be an http(s) URL")
+    if not re.fullmatch(r"[0-9a-fA-F]{64}", args.bundle_sha256):
+        raise SystemExit("--bundle-sha256 must be a 64-character hexadecimal digest")
+    return args.bundle_url, args.bundle_sha256.lower()
+
+
+def _shared_cells(bundle_url, bundle_sha, row, repo_root):
+    cells = []
+    md(cells, f"""\
+    # E3 {row['round']} shard
+
+    This notebook is fully pre-filled for **DGP{row['dgp']}**, training
+    **n={row['n']}**, mode **{row['mode']}**, and emitted seeds
+    **{row['seed_start']}..{row['seed_end']}**. Run cells from top to bottom.
+    There is no configuration cell to edit. The CSV checkpoint is written to
+    Google Drive after every completed replication.
+    """)
+    code(cells, textwrap.dedent("""\
+        import os, platform, subprocess, time
+
+        def sh(cmd):
+            p = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+            return p.stdout.strip()
+
+        print("hostname:", platform.node() or "n/a")
+        print("os:", platform.platform())
+        print("nproc:", sh("nproc"))
+        print("cpu:", sh("grep -m1 -E 'model name' /proc/cpuinfo") or "n/a")
+        print(sh("free -g") or "RAM information unavailable")
+        print("mc.cores is fixed at 2; model fits are fixed to one thread.")
+        """))
+    code(cells, textwrap.dedent("""\
+        import subprocess
+        p = subprocess.run(
+            ["bash", "-lc", "apt-get -qq update >/dev/null && "
+             "apt-get -qq install -y --no-install-recommends "
+             "r-base r-base-dev libcurl4-openssl-dev >/dev/null 2>&1"],
+            capture_output=True, text=True)
+        if p.returncode != 0:
+            print(p.stdout[-1000:])
+            print(p.stderr[-2000:])
+            raise RuntimeError("R installation failed")
+        print(subprocess.check_output(["R", "--version"], text=True).splitlines()[0])
+        """))
+    code(cells, textwrap.dedent("""\
+        from google.colab import drive
+        drive.mount("/content/drive")
+        print("Drive mounted")
+        """))
+    code(cells, textwrap.dedent(f"""\
+        import hashlib, os, re, shutil, subprocess, urllib.request
+
+        BUNDLE_URL = {bundle_url!r}
+        BUNDLE_SHA256 = {bundle_sha!r}
+        assert BUNDLE_URL not in ("", "{UNBUILT_URL}"), \\
+            "Bundle URL is not built; regenerate with a real URL."
+        assert re.fullmatch(r"[0-9a-fA-F]{{64}}", BUNDLE_SHA256), \\
+            "Bundle SHA256 is missing or malformed; regenerate the notebook."
+
+        DEST = "/content"
+        LIBDIR = "/content/tisca_rlib/rlib"
+        download_path = "/content/_dl_tisca_rlib.tar.gz"
+        urllib.request.urlretrieve(BUNDLE_URL, download_path)
+        with open(download_path, "rb") as f:
+            observed_sha = hashlib.sha256(f.read()).hexdigest()
+        assert observed_sha == BUNDLE_SHA256.lower(), "R library bundle SHA mismatch"
+        if os.path.isdir("/content/tisca_rlib"):
+            shutil.rmtree("/content/tisca_rlib")
+        subprocess.run(["tar", "xzf", download_path, "-C", DEST], check=True)
+        assert os.path.isdir(LIBDIR), "bundle did not restore the expected rlib directory"
+        print("bundle restored:", LIBDIR)
+        """))
+    code(cells, textwrap.dedent("""\
+        import os, urllib.request
+
+        RUNCELL_URL = (
+            "https://raw.githubusercontent.com/hugogobato/"
+            "Test-Informed-Simulation-Count-Algorithm-TISCA/main/"
+            "experiments/E3_mvbcf_casestudy/run_cell.R"
+        )
+        MVBCF_CPP_URL = (
+            "https://raw.githubusercontent.com/Nathan-McJames/MVBCF_Paper/"
+            "main/MVBCF_Code.cpp"
+        )
+        os.makedirs("/content/e3", exist_ok=True)
+        urllib.request.urlretrieve(RUNCELL_URL, "/content/e3/run_cell.R")
+        # The upstream C++ is downloaded at runtime and is never committed here.
+        urllib.request.urlretrieve(MVBCF_CPP_URL, "/content/e3/MVBCF_Code.cpp")
+        assert os.path.getsize("/content/e3/run_cell.R") > 1000
+        assert os.path.getsize("/content/e3/MVBCF_Code.cpp") > 10000
+        print("downloaded run_cell.R and upstream MVBCF_Code.cpp")
+        """))
+    code(cells, textwrap.dedent("""\
+        import os, subprocess
+
+        compile_script = "\\n".join([
+            ".libPaths(c('/content/tisca_rlib/rlib', .libPaths()))",
+            "if (!requireNamespace('Rcpp', quietly=TRUE) ||",
+            "    !requireNamespace('RcppArmadillo', quietly=TRUE) ||",
+            "    !requireNamespace('RcppDist', quietly=TRUE)) stop('bundle missing Rcpp dependencies')",
+            "library(Rcpp)",
+            "sourceCpp('/content/e3/MVBCF_Code.cpp')",
+            "stopifnot(is.function(fast_bart))",
+            "cat('FAST_BART_OK\\\\n')",
+        ])
+        with open("/content/e3/compile.R", "w") as f:
+            f.write(compile_script)
+        p = subprocess.run(["Rscript", "/content/e3/compile.R"],
+                           capture_output=True, text=True)
+        print(p.stdout[-3000:])
+        if p.returncode != 0 or "FAST_BART_OK" not in p.stdout:
+            print(p.stderr[-3000:])
+            raise RuntimeError("upstream MVBCF C++ compilation failed")
+        print("fast_bart() compiled")
+        """))
+    return cells
+
+
+def _run_cells(row):
+    cells = []
+    md(cells, """\
+    ## Fixed shard configuration
+
+    The constants below were generated from `shard_table.csv`. They are
+    assertions, not operator inputs. A dropped session can be restarted by
+    uploading this same notebook, because existing seed rows are skipped.
+    """)
+    config = textwrap.dedent(f"""\
+        import csv, os, subprocess, time
+
+        DGP = {row['dgp']}
+        N = {row['n']}
+        MODE = {row['mode']!r}
+        SHARD_ID = {row['notebook_filename'].split('_shard')[1].split('_')[0]!r}
+        CLI_SEED_START = {row['cli_seed_start']}
+        CLI_SEED_END = {row['cli_seed_end']}
+        EXPECTED_SEED_START = {row['seed_start']}
+        EXPECTED_SEED_END = {row['seed_end']}
+        MC_CORES = 2
+        DRIVE_DIR = "/content/drive/MyDrive/TISCA_E3"
+        OUTPUT_CSV = os.path.join(DRIVE_DIR, {row['output_filename']!r})
+        GIT_SHA = "not-a-git-build"
+
+        assert DGP in (1, 2, 3)
+        assert N in (100, 500)
+        assert MODE in ("pilot", "confirmatory")
+        assert MC_CORES == 2
+        assert CLI_SEED_START == 0 or CLI_SEED_START > 0
+        assert CLI_SEED_END >= CLI_SEED_START
+        assert EXPECTED_SEED_END - EXPECTED_SEED_START + 1 == CLI_SEED_END - CLI_SEED_START + 1
+        os.makedirs(DRIVE_DIR, exist_ok=True)
+
+        def emitted_seed(raw_seed):
+            return raw_seed + 1000001 if MODE == "pilot" else raw_seed
+
+        def contiguous_ranges(values):
+            values = sorted(values)
+            if not values:
+                return []
+            out = []
+            start = previous = values[0]
+            for value in values[1:]:
+                if value != previous + 1:
+                    out.append((start, previous))
+                    start = value
+                previous = value
+            out.append((start, previous))
+            return out
+
+        existing = set()
+        if os.path.exists(OUTPUT_CSV):
+            with open(OUTPUT_CSV, newline="") as f:
+                rows = list(csv.DictReader(f))
+            existing = {{int(r["seed"]) for r in rows if r.get("seed") not in (None, "")}}
+            assert len(existing) == len(rows), \\
+                "duplicate checkpoint seeds found; repair the Drive CSV before restarting"
+        expected = {{emitted_seed(i) for i in range(CLI_SEED_START, CLI_SEED_END + 1)}}
+        assert existing <= expected, "checkpoint contains a seed outside this shard"
+        missing_raw = [i for i in range(CLI_SEED_START, CLI_SEED_END + 1)
+                       if emitted_seed(i) not in existing]
+        print("checkpoint:", len(existing), "rows; missing:", len(missing_raw))
+        print("Drive CSV:", OUTPUT_CSV)
+        """)
+    code(cells, config)
+    code(cells, textwrap.dedent("""\
+        # Run only missing contiguous ranges. This makes a re-upload idempotent
+        # while preserving run_cell.R's shard-offset-invariant RNG streams.
+        env = dict(os.environ)
+        env["R_LIBS"] = LIBDIR + ":" + env.get("R_LIBS", "")
+        env["TISCA_MVBCF_CPP"] = "/content/e3/MVBCF_Code.cpp"
+        env["TISCA_GIT_SHA"] = GIT_SHA
+        for raw_start, raw_end in contiguous_ranges(missing_raw):
+            cmd = ["Rscript", "/content/e3/run_cell.R", str(DGP), str(N),
+                   str(raw_start), str(raw_end), "--out", OUTPUT_CSV,
+                   "--cores", str(MC_CORES), "--mode", MODE]
+            print("running missing range:", " ".join(cmd))
+            t0 = time.time()
+            result = subprocess.run(cmd, env=env, capture_output=True, text=True)
+            print(result.stdout[-6000:])
+            print("range wall-clock: %.1f min" % ((time.time() - t0) / 60.0))
+            if result.returncode != 0:
+                print(result.stderr[-4000:])
+                raise RuntimeError("run_cell.R failed")
+        """))
+    code(cells, textwrap.dedent("""\
+        import csv, os
+        with open(OUTPUT_CSV, newline="") as f:
+            rows = list(csv.DictReader(f))
+        got = [int(r["seed"]) for r in rows]
+        expected = list(range(EXPECTED_SEED_START, EXPECTED_SEED_END + 1))
+        assert len(got) == len(set(got))
+        assert set(got) == set(expected), "shard checkpoint is incomplete"
+        failures = sum(r.get("converged_flag") == "0" for r in rows)
+        print("completed rows:", len(rows), "of", len(expected))
+        print("converged_flag failures:", failures)
+        print("checkpoint bytes:", os.path.getsize(OUTPUT_CSV))
+        try:
+            from google.colab import files
+            files.download(OUTPUT_CSV)
+            print("Downloaded:", OUTPUT_CSV)
+        except Exception as e:
+            print("(Not on Colab / download skipped):", e)
+        """))
+    return cells
+
+
+def _calibration_cells(row):
+    cells = []
+    md(cells, """\
+    ## P3-T5(e) calibration gate
+
+    This DGP1, n=500 pilot is the first notebook to run. The gate below must
+    pass before any Round 1 notebook is started. The other Round 0 pilot
+    notebooks are then run for their independent cell pilots.
+    """)
+    code(cells, textwrap.dedent("""\
+        import csv, statistics
+        with open(OUTPUT_CSV, newline="") as f:
+            rows = list(csv.DictReader(f))
+        assert len(rows) == 50, "the DGP1 n=500 calibration pilot must have 50 rows"
+        def values(key):
+            return [float(r[key]) for r in rows if r.get(key) not in (None, "")]
+        targets = {
+            "bcf_pehe1": (9.3, 10.0, "BCF PEHE Y1"),
+            "bcf_pehe2": (9.6, 10.3, "BCF PEHE Y2"),
+            "bcf_cov951": (0.95, 0.98, "BCF tau 95% coverage Y1"),
+            "bcf_cov952": (0.94, 0.98, "BCF tau 95% coverage Y2"),
+        }
+        passed = True
+        for key, (lo, hi, label) in targets.items():
+            v = values(key)
+            mean = statistics.mean(v)
+            se = statistics.stdev(v) / (len(v) ** 0.5)
+            ok = lo <= mean <= hi
+            passed = passed and ok
+            print(f"{label}: mean={{mean:.3f}} se={{se:.3f}} band=[{{lo}},{{hi}}] -> {{'PASS' if ok else 'FAIL'}}")
+        print("P3-T5(e) VERDICT:", "PASS" if passed else "FAIL")
+        assert passed, "calibration gate failed; diagnose before Round 1"
+        """))
+    return cells
+
+
+def _sanity(nb, name):
+    for index, cell in enumerate(nb["cells"]):
+        source = "".join(cell["source"])
+        assert "PASTE_" not in source, f"{name} cell {index} contains a placeholder"
+        assert "'''" not in source and '"""' not in source, \
+            f"{name} cell {index} contains an unsafe triple quote"
+
+
+def write_outputs(repo_root, rows, bundle_url, bundle_sha):
+    notebook_dir = repo_root / "notebooks" / "E3_shards"
+    notebook_dir.mkdir(parents=True, exist_ok=True)
+    for old in notebook_dir.glob("E3_*.ipynb"):
+        old.unlink()
+
+    row_by_name = {}
+    for row in rows:
+        cells = _shared_cells(bundle_url, bundle_sha, row, repo_root)
+        cells.extend(_run_cells(row))
+        if row["mode"] == "pilot" and row["dgp"] == 1 and row["n"] == 500:
+            cells.extend(_calibration_cells(row))
+        nb = notebook(cells)
+        _sanity(nb, row["notebook_filename"])
+        path = notebook_dir / row["notebook_filename"]
+        path.write_text(json.dumps(nb, indent=1) + "\n")
+        row_by_name[row["notebook_filename"]] = nb
+
+    # Preserve the two historical entry points, generated from the exact same
+    # code and with real shard parameters baked in.
+    first_confirm = next(r for r in rows if r["mode"] == "confirmatory")
+    first_pilot = next(r for r in rows
+                       if r["mode"] == "pilot" and r["dgp"] == 1 and r["n"] == 500)
+    (repo_root / "notebooks" / "E3_mvbcf_shard.ipynb").write_text(
+        json.dumps(row_by_name[first_confirm["notebook_filename"]], indent=1) + "\n")
+    (repo_root / "notebooks" / "E3_round0_pilot_calibration.ipynb").write_text(
+        json.dumps(row_by_name[first_pilot["notebook_filename"]], indent=1) + "\n")
+
+    table_path = repo_root / "experiments" / "E3_mvbcf_casestudy" / "shard_table.csv"
+    table_path.parent.mkdir(parents=True, exist_ok=True)
+    fields = list(rows[0])
+    with table_path.open("w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fields)
+        writer.writeheader()
+        writer.writerows(rows)
+    print(f"wrote {len(rows)} shard notebooks to {notebook_dir}")
+    print(f"wrote {table_path}")
+    print("wrote historical templates from the first confirmatory and calibration shards")
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    _bundle_args(parser)
+    args = parser.parse_args()
+    bundle_url, bundle_sha = _validated_bundle(args)
+    repo_root = Path(__file__).resolve().parents[2]
+    rows = build_shards()
+    write_outputs(repo_root, rows, bundle_url, bundle_sha)
+
+
+if __name__ == "__main__":
+    main()

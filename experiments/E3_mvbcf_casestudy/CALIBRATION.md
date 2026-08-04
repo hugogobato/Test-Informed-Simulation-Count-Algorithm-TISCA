@@ -6,7 +6,7 @@
 
 | Artifact | Notes |
 |---|---|
-| `run_cell.R` | the P3-T5(a) driver, derived from `GitHub_DGP1.R` (see its header for the deviation list). Validated locally: parses; the DGP formula blocks, the L'Ecuyer-CMRG stream construction, and the 170-column schema pass `ALL_VALIDATION_PASSED`. **Note what that validation does and does not cover** (see the audit below): it exercises the schema and the seed machinery, never the model calls, so six defects in the fitting and metric code survived it. |
+| `run_cell.R` | the P3-T5(a) driver, derived from `GitHub_DGP1.R` (see its header for the deviation list). Validated locally: parses; the DGP formula blocks, the L'Ecuyer-CMRG stream construction, and the 171-column schema pass `ALL_VALIDATION_PASSED`. **Note what that validation does and does not cover** (see the audit below): it exercises the schema and the seed machinery, never the model calls, so six defects in the fitting and metric code survived it. |
 
 ## Pre-execution audit, 2026-08-04 (before any Colab session was spent)
 

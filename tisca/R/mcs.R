@@ -137,136 +137,197 @@ spa_test <- function(L, champ = NULL, B = 999L, seed = NULL, precomputed_d = FAL
 
 ## ---- Model Confidence Set ------------------------------------------------------
 
-#' Model Confidence Set (Hansen, Lunde & Nason 2011), T_R and T_max variants.
+#' Pairwise loss differences and model-average differences.
 #'
-#' Sequentially eliminates the worst model (largest mean loss) while a statistic
-#' rejects the hypothesis that all remaining models are equal in expected loss,
-#' controlling FWER over the elimination path. Returns the set of models
-#' indistinguishable from the best at level alpha and the elimination path.
-#'
-#' Statistics on the loss matrix:
-#'   T_{jk} = \bar d_{.jk} / sqrt(\hat var(d_{.jk})/J),  d_{ijk} = L_{ij} - L_{ik}
-#'   T_R (range) = max_{j,k} |T_{jk}|;  T_max = max over j of the max mean.
-#' Elimination by the largest mean loss.
-#'
-#' @param L J x M loss matrix (lower is better)
-#' @param B bootstrap resamples (B = 4999 for the final analysis MCSE)
-#' @param alpha confidence level (set is 1-alpha "confidence"); complement size alpha
-#' @param statistic "T_R" (default) or "T_max"
-#' @param seed optional seed
-#' @return object of class "tisca_mcs" with models_kept, eliminated, p_values, B,
-#'   statistic, mcse
-mcs <- function(L, B = 999L, alpha = 0.05,
-                statistic = c("T_R","T_max"), seed = NULL) {
-  statistic <- match.arg(statistic)
-  if (is.null(dim(L))) L <- matrix(L, ncol = 1)
-  colnames(L) <- if (is.null(colnames(L))) paste0("M", seq_len(ncol(L))) else colnames(L)
-  if (is.null(seed)) seed <- 1L
-  J <- nrow(L)
-  models <- seq_len(ncol(L))
-  eliminated <- character(0)
-  p_elim <- numeric(0)
-  while (length(models) > 1) {
-    subL <- L[, models, drop = FALSE]
-    stat_obs <- mcs_stat(subL, statistic)
-    stat_boot <- mcs_stat_boot(subL, statistic, B, seed)
-    p <- mean(stat_boot >= stat_obs)
-    p_elim <- c(p_elim, p)
-    if (p <= alpha) {
-      worst <- which.max(colMeans(subL))
-      eliminated <- c(eliminated, colnames(subL)[worst])
-      models <- models[-worst]
-      models <- models[order(models)]
-    } else {
-      break
+#' This is the CRAN MCS package's `GetD` calculation.  The diagonal is zero,
+#' `mD_ij_bar[i, j] = mean(L_i - L_j)`, and `vD_i_bar` is the average over the
+#' other models for each model i.
+GetD <- function(mL) {
+  mL <- as.matrix(mL)
+  iM <- ncol(mL)
+  mD_ij_bar <- matrix(0, nrow = iM, ncol = iM)
+  if (iM > 1L) {
+    for (i in seq_len(iM)) for (j in i:iM) if (i != j) {
+      v <- mean(mL[, i] - mL[, j])
+      mD_ij_bar[i, j] <- v
+      mD_ij_bar[j, i] <- -v
     }
   }
-  mcse <- if (length(p_elim)) sqrt(p_elim[length(p_elim)] * (1 - p_elim[length(p_elim)]) / B) else NA_real_
+  vD_i_bar <- if (iM > 1L) rowSums(mD_ij_bar) / (iM - 1L) else numeric(iM)
+  list(mD_ij_bar = mD_ij_bar, vD_i_bar = vD_i_bar)
+}
+
+#' Python/CRAN MCS statistic calculation for one active model set.
+#'
+#' `bootstrap_indices` is a J x B matrix of 1-based row indices.  The variance
+#' estimates are the bootstrap second moments about the observed statistic,
+#' exactly as in the Python reference implementation.
+.mcs_stats <- function(mL, bootstrap_indices) {
+  mL <- as.matrix(mL)
+  iT <- nrow(mL); iM <- ncol(mL); B <- ncol(bootstrap_indices)
+  d <- GetD(mL)
+  mD_ij_bar <- d$mD_ij_bar
+  vD_i_bar <- d$vD_i_bar
+
+  mean_res <- matrix(0, nrow = B, ncol = iM)
+  for (b in seq_len(B)) mean_res[b, ] <- colMeans(mL[bootstrap_indices[, b], , drop = FALSE])
+
+  aD_ij_bar_res <- array(0, dim = c(B, iM, iM))
+  mD_i_bar_res <- matrix(0, nrow = B, ncol = iM)
+  for (b in seq_len(B)) {
+    aD_ij_bar_res[b, , ] <- outer(mean_res[b, ], mean_res[b, ], "-")
+    mD_i_bar_res[b, ] <- rowSums(aD_ij_bar_res[b, , ]) / (iM - 1L)
+  }
+
+  mD_ij_bar_var <- matrix(0, nrow = iM, ncol = iM)
+  for (i in seq_len(iM)) for (j in seq_len(iM)) {
+    mD_ij_bar_var[i, j] <- mean((aD_ij_bar_res[, i, j] - mD_ij_bar[i, j])^2)
+  }
+  vD_i_bar_var <- vapply(seq_len(iM), function(i)
+    mean((mD_i_bar_res[, i] - vD_i_bar[i])^2), numeric(1))
+
+  tij <- matrix(0, nrow = iM, ncol = iM)
+  ok <- mD_ij_bar_var > 0
+  tij[ok] <- mD_ij_bar[ok] / sqrt(mD_ij_bar_var[ok])
+  ti <- numeric(iM)
+  ok_i <- vD_i_bar_var > 0
+  ti[ok_i] <- vD_i_bar[ok_i] / sqrt(vD_i_bar_var[ok_i])
+
+  tij_res <- array(0, dim = c(iM, iM, B))
+  ti_res <- matrix(0, nrow = iM, ncol = B)
+  for (b in seq_len(B)) {
+    tij_res[, , b][ok] <- (aD_ij_bar_res[b, , ][ok] - mD_ij_bar[ok]) /
+      sqrt(mD_ij_bar_var[ok])
+    if (any(ok_i)) ti_res[ok_i, b] <-
+      (mD_i_bar_res[b, ok_i] - vD_i_bar[ok_i]) / sqrt(vD_i_bar_var[ok_i])
+  }
+  list(mD_ij_bar = mD_ij_bar, vD_i_bar = vD_i_bar,
+       mD_ij_bar_var = mD_ij_bar_var, vD_i_bar_var = vD_i_bar_var,
+       tij = tij, ti = ti, tij_res = tij_res, ti_res = ti_res)
+}
+
+#' Model Confidence Set (Hansen, Lunde & Nason 2011), port of Python `mcs`.
+#'
+#' The elimination path always runs down to one model.  `p_H0` records the
+#' bootstrap p-value at the step where a model is removed, while `p_mcs` is the
+#' running maximum of those p-values.  Hansen's confidence set is selected from
+#' `p_mcs`, not from the individual step p-values.
+#'
+#' @param L J x M loss matrix (lower is better)
+#' @param B number of bootstrap resamples
+#' @param alpha complement of the confidence level
+#' @param statistic "Tmax", "TR", "T_max", or "T_R"
+#' @param seed optional seed used once to draw all bootstrap indices
+#' @param bootstrap_indices optional J x B matrix of 1-based row indices
+#' @return object of class "tisca_mcs"
+mcs <- function(L, B = 999L, alpha = 0.05,
+                statistic = "T_R", seed = NULL,
+                bootstrap_indices = NULL) {
+  if (is.null(dim(L))) L <- matrix(L, ncol = 1)
+  L <- as.matrix(L)
+  if (!is.numeric(L) || any(!is.finite(L))) stop("L must be a finite numeric matrix")
+  if (nrow(L) < 1L || ncol(L) < 1L) stop("L must have at least one row and column")
+  if (length(B) != 1L || B <= 0) stop("B must be positive")
+  if (length(alpha) != 1L || !is.finite(alpha) || alpha < 0 || alpha > 1) {
+    stop("alpha must be in [0, 1]")
+  }
+  aliases <- c(Tmax = "Tmax", T_max = "Tmax", TR = "TR", T_R = "TR")
+  canonical <- unname(aliases[statistic])
+  if (length(statistic) != 1L || length(canonical) != 1L || is.na(canonical)) {
+    stop("statistic must be one of 'Tmax', 'TR', 'T_max', or 'T_R'")
+  }
+  statistic <- canonical
+  B <- as.integer(B)
+  J <- nrow(L); iM <- ncol(L)
+  if (is.null(colnames(L))) colnames(L) <- paste0("M", seq_len(iM))
+  model_names <- colnames(L)
+
+  if (is.null(bootstrap_indices)) {
+    if (!is.null(seed)) set.seed(seed)
+    bootstrap_indices <- matrix(sample.int(J, size = J * B, replace = TRUE),
+                                nrow = J, ncol = B)
+  } else {
+    bootstrap_indices <- as.matrix(bootstrap_indices)
+    if (!is.numeric(bootstrap_indices) ||
+        !identical(dim(bootstrap_indices), c(J, B)) ||
+        any(!is.finite(bootstrap_indices)) ||
+        any(bootstrap_indices != floor(bootstrap_indices)) ||
+        any(bootstrap_indices < 1 | bootstrap_indices > J)) {
+      stop("bootstrap_indices must be a J x B matrix of 1-based row indices")
+    }
+    bootstrap_indices <- matrix(as.integer(bootstrap_indices), nrow = J, ncol = B)
+  }
+
+  p_H0 <- rep(NA_real_, iM)
+  p_mcs <- rep(NA_real_, iM)
+  avg_loss <- colMeans(L)
+  elimination_order <- character(0)
+  elimination_pvalues <- numeric(0)
+  working <- L
+  working_names <- model_names
+
+  while (ncol(working) > 1L) {
+    st <- .mcs_stats(working, bootstrap_indices)
+    if (statistic == "Tmax") {
+      obs <- max(st$ti)
+      boot <- apply(st$ti_res, 2, max)
+      e <- which.max(st$ti)
+    } else {
+      obs <- max(abs(st$tij))
+      boot <- apply(abs(st$tij_res), 3, max)
+      e <- which.max(apply(st$tij, 1, max))
+    }
+    p <- mean(boot > obs)
+    eliminated <- working_names[e]
+    pos <- match(eliminated, model_names)
+    p_H0[pos] <- p
+    p_mcs[pos] <- max(p_H0, na.rm = TRUE)
+    elimination_order <- c(elimination_order, eliminated)
+    elimination_pvalues <- c(elimination_pvalues, p)
+    working <- working[, -e, drop = FALSE]
+    working_names <- working_names[-e]
+  }
+
+  p_H0[is.na(p_H0)] <- 1.0
+  p_mcs[is.na(p_mcs)] <- 1.0
+  included <- model_names[p_mcs > alpha]
+  excluded <- model_names[p_mcs <= alpha]
+  mcse <- if (length(elimination_pvalues)) {
+    p <- elimination_pvalues[length(elimination_pvalues)]
+    sqrt(p * (1 - p) / B)
+  } else NA_real_
+  tab_order <- order(p_mcs)
+  table <- cbind(avg_loss = avg_loss[tab_order], p_H0 = p_H0[tab_order],
+                 p_mcs = p_mcs[tab_order])
+  rownames(table) <- model_names[tab_order]
+
   structure(list(
-    models_kept = colnames(L)[models],
-    eliminated  = eliminated,
-    p_values    = p_elim,
-    B           = B,
-    statistic   = statistic,
-    mcse        = mcse
+    models_kept = included,
+    eliminated = elimination_order,
+    p_values = elimination_pvalues,
+    included = included,
+    excluded = excluded,
+    p_H0 = setNames(p_H0, model_names),
+    p_mcs = setNames(p_mcs, model_names),
+    elimination_order = elimination_order,
+    elimination_pvalues = elimination_pvalues,
+    avg_loss = setNames(avg_loss, model_names),
+    table = table,
+    B = B, alpha = alpha, statistic = statistic, seed = seed, mcse = mcse
   ), class = "tisca_mcs")
 }
 
 print.tisca_mcs <- function(x, ...) {
   cat("Model Confidence Set (", x$statistic, "), B = ", x$B, "\n", sep = "")
-  cat("kept (indistinguishable from best): ", paste(x$models_kept, collapse = ", "), "\n", sep = "")
-  if (length(x$eliminated)) {
-    cat("eliminated (path): ", paste(paste0(x$eliminated, " (p=", round(x$p_values, 3), ")"),
-                                       collapse = ", "), "\n", sep = "")
+  cat("confidence set: ", paste(x$included, collapse = ", "), "\n", sep = "")
+  cat("excluded: ", paste(x$excluded, collapse = ", "), "\n", sep = "")
+  if (length(x$elimination_order)) {
+    cat("elimination path: ", paste(
+      paste0(x$elimination_order, " (p_H0=", round(x$elimination_pvalues, 3), ")"),
+      collapse = ", "), "\n", sep = "")
   }
   cat("bootstrap-p MCSE: ", ifelse(is.na(x$mcse), "NA", round(x$mcse, 4)), "\n")
   invisible(x)
-}
-
-#' Range / max studentized statistic on a loss matrix.
-#' @param subL J x k loss matrix
-#' @param statistic "T_R" or "T_max"
-#' @return scalar statistic
-mcs_stat <- function(subL, statistic) {
-  k <- ncol(subL); J <- nrow(subL)
-  if (k == 1) return(0)
-  if (statistic == "T_R") {
-    # T_{jk} over all ordered pairs
-    tjk <- matrix(0, k, k)
-    for (p in seq_len(k)) for (q in seq_len(k)) if (p != q) {
-      d <- subL[, p] - subL[, q]
-      dbar <- mean(d)
-      se <- stats::sd(d) / sqrt(J)
-      tjk[p, q] <- if (se > 0) dbar / se else 0
-    }
-    max(abs(tjk))
-  } else { # T_max
-    # max of the model-mean studentized statistics (about the grand mean)
-    means <- colMeans(subL)
-    d_cent <- sweep(subL, 1, rowMeans(subL))
-    var_m <- colMeans(d_cent^2)
-    se <- sqrt(var_m / J)
-    max(means / se)
-  }
-}
-
-#' Bootstrap null distribution of the MCS statistic (i.i.d. row resample).
-#' @param subL J x k loss matrix
-#' @param statistic "T_R" or "T_max"
-#' @param B resamples
-#' @param seed optional seed
-#' @return numeric vector of length B of bootstrap statistics
-mcs_stat_boot <- function(subL, statistic, B, seed = NULL) {
-  if (!is.null(seed)) set.seed(seed)
-  J <- nrow(subL); k <- ncol(subL)
-  keep <- which(!is.na(colSums(subL)))
-  subL <- subL[, keep, drop = FALSE]
-  k <- ncol(subL)
-  stats <- numeric(B)
-  if (k == 1) return(stats)
-  means <- colMeans(subL)
-  d0 <- subL - rep(means, each = J)   # centre on the null (all means equal)
-  for (b in seq_len(B)) {
-    i <- sample.int(J, size = J, replace = TRUE)
-    db <- d0[i, , drop = FALSE]
-    cb <- colMeans(db)
-    # centre bootstrap losses on the bootstrap grand mean (enforce null)
-    dbc <- db - rep(mean(cb), each = J)
-    if (statistic == "T_R") {
-      tjk <- matrix(0, k, k)
-      for (p in seq_len(k)) for (q in seq_len(k)) if (p != q) {
-        dd <- dbc[, p] - dbc[, q]
-        se <- stats::sd(dd) / sqrt(J)
-        tjk[p, q] <- if (se > 0) mean(dd) / se else 0
-      }
-      stats[b] <- max(abs(tjk))
-    } else {
-      var_m <- colMeans(dbc^2)
-      se <- sqrt(var_m / J)
-      stats[b] <- max(sapply(seq_len(k), function(m) if (se[m] > 0) cb[m] / se[m] else 0))
-    }
-  }
-  stats
 }
 
 ## ---- MCS with CRAN oracle (unit-test path only) --------------------------------

@@ -10,7 +10,7 @@ the comparisons were pre-specified.
 **Scope of the plan:** the `run_cell.R` re-run of DGP1/2/3 at n = 500 and DGP1 at
 n = 100, 1000 replications per cell, plus the 50-replication pilots. The recorded
 columns and their definitions are fixed in `run_cell.R` (see the header and the
-`COL_NAMES` schema, 170 columns).
+`COL_NAMES` schema, 171 columns, including per-replication `replication_seconds`).
 
 ---
 
