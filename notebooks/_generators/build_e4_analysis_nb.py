@@ -39,19 +39,37 @@ md(textwrap.dedent("""\
     """))
 
 code(textwrap.dedent("""\
-    import os, csv, re
+    import os, csv, re, subprocess, sys
     import pandas as pd
     import matplotlib
     import matplotlib.pyplot as plt
 
+    # A notebook uploaded by itself does not carry the repository checkout.
+    # Clone it when necessary, then generate the mechanical coded CSV if it is
+    # not already present. No manual file upload or cell edit is required.
+    REPO_URL = "https://github.com/hugogobato/Test-Informed-Simulation-Count-Algorithm-TISCA.git"
+    REPO_DIR = "/content/Test-Informed-Simulation-Count-Algorithm-TISCA"
+    if not os.path.isdir(os.path.join(REPO_DIR, "experiments", "E4_bibliometrics")):
+        subprocess.run(["git", "clone", "--depth", "1", REPO_URL, REPO_DIR], check=True)
+    REPO_ROOT = REPO_DIR
+    try:
+        import openpyxl  # noqa: F401
+    except ImportError:
+        subprocess.run([sys.executable, "-m", "pip", "install", "-q", "openpyxl"], check=True)
+
+    CODE_SCRIPT = os.path.join(REPO_ROOT, "experiments", "E4_bibliometrics",
+                               "code_bibliometrics.py")
+    CSV_PATH = os.path.join(REPO_ROOT, "results", "E4", "bibliometric_coded.csv")
+    if not os.path.exists(CSV_PATH):
+        subprocess.run([sys.executable, CODE_SCRIPT], cwd=REPO_ROOT, check=True)
+    assert os.path.exists(CSV_PATH), "E4 coding script did not create bibliometric_coded.csv"
+    print("[PASS] coded bibliometric data:", CSV_PATH)
+
     # locate the coded CSV (repo checkout preferred)
-    cands = [
-        "/content/Test-Informed-Simulation-Count-Algorithm-TISCA/results/E4/bibliometric_coded.csv",
-        os.path.join(os.getcwd(), "results", "E4", "bibliometric_coded.csv"),
-    ]
+    cands = [CSV_PATH, os.path.join(os.getcwd(), "results", "E4", "bibliometric_coded.csv")]
     path = next((p for p in cands if os.path.exists(p)), None)
     if path is None:
-        raise SystemExit("bibliometric_coded.csv not found; run experiments/E4_bibliometrics/code_bibliometrics.py first")
+        raise SystemExit("bibliometric_coded.csv not found after repository setup")
     df = pd.read_csv(path, keep_default_na=False)
 
     # Larger fonts for print legibility (SoutoNeto 4)

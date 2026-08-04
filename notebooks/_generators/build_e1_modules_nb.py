@@ -8,8 +8,9 @@ The generated notebooks are:
 * ``E1_modB_shard2.ipynb``: the remaining 300 Module-B cells.
 
 All three notebooks use the pure-Python P2-T3 harness, checkpoint one completed
-cell at a time to Google Drive, resume from an existing CSV, and offer the CSV
-through ``google.colab.files.download`` at the end.
+cell at a time under ``/content``, and offer the CSV through
+``google.colab.files.download`` at the end. They assume the Colab session runs
+to completion; a runtime failure loses the local checkpoint.
 
 Regenerate all three with::
 
@@ -62,28 +63,22 @@ LOCAL_REPO = "/content/Test-Informed-Simulation-Count-Algorithm-TISCA"
 CLONED_REPO = "/content/TISCA_repo"
 
 if os.path.isdir(os.path.join(LOCAL_REPO, "tisca", "python")):
+    REPO_ROOT = LOCAL_REPO
     SOURCE_ROOT = os.path.join(LOCAL_REPO, "tisca", "python")
 elif os.path.isdir(os.path.join(CLONED_REPO, "tisca", "python")):
+    REPO_ROOT = CLONED_REPO
     SOURCE_ROOT = os.path.join(CLONED_REPO, "tisca", "python")
 else:
     subprocess.run(["git", "clone", "--depth", "1", REPO_URL, CLONED_REPO], check=True)
+    REPO_ROOT = CLONED_REPO
     SOURCE_ROOT = os.path.join(CLONED_REPO, "tisca", "python")
 
 assert os.path.isdir(SOURCE_ROOT), f"TISCA Python package not found at {SOURCE_ROOT}"
 sys.path.insert(0, SOURCE_ROOT)
 
-try:
-    from google.colab import drive
-    drive.mount("/content/drive", force_remount=False)
-except Exception as exc:
-    print("(Not on Colab / Drive mount skipped):", exc)
-
-if os.path.isdir("/content/drive/MyDrive"):
-    DRIVE_ROOT = "/content/drive/MyDrive/TISCA_E1"
-else:
-    DRIVE_ROOT = "/content/TISCA_E1"
-    print("[WARN] Drive is not mounted; checkpointing to", DRIVE_ROOT)
-os.makedirs(DRIVE_ROOT, exist_ok=True)
+OUTPUT_ROOT = "/content/TISCA_E1"
+os.makedirs(OUTPUT_ROOT, exist_ok=True)
+print("Outputs/checkpoints:", OUTPUT_ROOT)
 
 from tisca.outermc import engine, summarize_ocs
 from tisca import multiplicity
@@ -92,35 +87,32 @@ ALPHA = 0.05
 DELTA = 0.5
 JMAX = 1000
 MATRIX_CANDIDATES = [
-    os.path.join(DRIVE_ROOT, "E1_empirical_loss_matrix.npy"),
-    os.path.join(DRIVE_ROOT, "E1_empirical_loss_matrix.csv"),
+    os.path.join(REPO_ROOT, "legacy", "Paper_Experiments", "DGP1_500_results.csv"),
+    os.path.join(OUTPUT_ROOT, "E1_empirical_loss_matrix.npy"),
+    os.path.join(OUTPUT_ROOT, "E1_empirical_loss_matrix.csv"),
     "/content/E1_empirical_loss_matrix.npy",
     "/content/E1_empirical_loss_matrix.csv",
 ]
 
 
 def load_empirical_matrix():
-    """Find or upload the real M x 2 loss matrix used by family (g)."""
+    """Derive the empirical M x 2 pair from the committed 500 x 20 matrix."""
     path = next((p for p in MATRIX_CANDIDATES if os.path.exists(p)), None)
-    if path is None:
-        try:
-            from google.colab import files
-            print("Upload E1_empirical_loss_matrix.npy or .csv (M x 2) when prompted.")
-            uploaded = files.upload()
-            if uploaded:
-                name = next(iter(uploaded))
-                path = os.path.join("/content", name)
-        except Exception as exc:
-            print("(Upload skipped):", exc)
     if path is None or not os.path.exists(path):
         raise FileNotFoundError(
-            "The empirical family needs the real M x 2 loss matrix. "
-            "Place E1_empirical_loss_matrix.npy/.csv in the Drive folder or upload it."
+            "The committed legacy/Paper_Experiments/DGP1_500_results.csv was not "
+            "found in the repository checkout."
         )
-    if path.lower().endswith(".npy"):
-        matrix = np.load(path)
-    else:
+    if path.lower().endswith(".csv"):
+        raw = pd.read_csv(path)
+        required = ["mvbcf_pehe1", "bcf_pehe1"]
+        if all(column in raw.columns for column in required):
+            matrix = raw[required].to_numpy(dtype=float)
+            print("[PASS] empirical pair:", required, "from", path)
+            return matrix
         matrix = pd.read_csv(path, header=None).to_numpy(dtype=float)
+    else:
+        matrix = np.load(path)
     matrix = np.asarray(matrix, dtype=float)
     if matrix.ndim != 2 or matrix.shape[1] != 2 or matrix.shape[0] < 2:
         raise ValueError(f"empirical matrix must have shape (M, 2), got {matrix.shape}")
@@ -141,7 +133,7 @@ def _append(row, path):
 
 def run_grid(grid, output_name):
     """Run and checkpoint a deterministic grid, resuming completed cell IDs."""
-    output_file = os.path.join(DRIVE_ROOT, output_name)
+    output_file = os.path.join(OUTPUT_ROOT, output_name)
     error_file = output_file.replace("_results.csv", "_errors.csv")
     done = set()
     if os.path.exists(output_file) and os.path.getsize(output_file) > 0:
@@ -374,10 +366,10 @@ def _notebook_acd() -> dict:
         This is the combined Phase-3 runner specified in `REVISION_PLAN.md` P3-T2.
         It executes Module A (840 cells), Module C (243 cells), and Module D
         (216 cells), for 1,299 cells total. Each cell uses 5,000 outer repetitions,
-        is checkpointed to Google Drive, and is safe to resume after a Colab
-        disconnect. The empirical family requires the real M x 2 loss matrix used
-        by the E1 row-bootstrap; the setup cell finds it on Drive or offers the
-        standard Colab upload dialog.
+        is checkpointed under `/content`, and is intended to run to completion in
+        one Colab session. The empirical family is derived automatically from the
+        committed 500 x 20 `legacy/Paper_Experiments/DGP1_500_results.csv`, using
+        the pre-specified `mvbcf_pehe1` versus `bcf_pehe1` pair.
     """)
     _code(cells, COMMON_SETUP)
     _md(cells, """
@@ -426,10 +418,12 @@ def _notebook_b(shard: int) -> dict:
         uses B=999 as the bootstrap budget recorded with every row. The scalar
         P2-T3 harness receives the correction-specific planning level from
         `tisca.multiplicity.planning_alpha`, including the Romano-Wolf schedule.
-        Results are checkpointed to Drive one cell at a time and can be resumed.
+        Results are checkpointed under `/content` one cell at a time. This notebook
+        assumes the session completes; a runtime failure loses the local checkpoint.
 
-        The empirical family requires the real M x 2 loss matrix. The setup cell
-        finds it on Drive or invokes the standard Colab upload dialog.
+        The empirical family is derived automatically from the committed 500 x 20
+        `legacy/Paper_Experiments/DGP1_500_results.csv`, using the pre-specified
+        `mvbcf_pehe1` versus `bcf_pehe1` pair.
     """)
     _code(cells, COMMON_SETUP)
     _code(cells, _module_b_grid_code())

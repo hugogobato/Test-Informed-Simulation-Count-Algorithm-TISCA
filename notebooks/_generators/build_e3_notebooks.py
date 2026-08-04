@@ -199,7 +199,8 @@ def _shared_cells(bundle_source, bundle_sha, row, repo_root):
     **n={row['n']}**, mode **{row['mode']}**, and emitted seeds
     **{row['seed_start']}..{row['seed_end']}**. Run cells from top to bottom.
     There is no configuration cell to edit. The CSV checkpoint is written to
-    Google Drive after every completed replication.
+    `/content` after every completed replication. This notebook assumes the
+    session runs to completion; a runtime failure loses the local checkpoint.
     """)
     code(cells, textwrap.dedent("""\
         import os, platform, subprocess, time
@@ -227,11 +228,6 @@ def _shared_cells(bundle_source, bundle_sha, row, repo_root):
             print(p.stderr[-2000:])
             raise RuntimeError("R installation failed")
         print(subprocess.check_output(["R", "--version"], text=True).splitlines()[0])
-        """))
-    code(cells, textwrap.dedent("""\
-        from google.colab import drive
-        drive.mount("/content/drive")
-        print("Drive mounted")
         """))
     if bundle_source["kind"] == "gdrive_folder":
         bundle_restore = textwrap.dedent(f"""\
@@ -370,8 +366,8 @@ def _run_cells(row):
         EXPECTED_SEED_START = {row['seed_start']}
         EXPECTED_SEED_END = {row['seed_end']}
         MC_CORES = 2
-        DRIVE_DIR = "/content/drive/MyDrive/TISCA_E3"
-        OUTPUT_CSV = os.path.join(DRIVE_DIR, {row['output_filename']!r})
+        OUTPUT_DIR = "/content/TISCA_E3"
+        OUTPUT_CSV = os.path.join(OUTPUT_DIR, {row['output_filename']!r})
         GIT_SHA = "not-a-git-build"
 
         assert DGP in (1, 2, 3)
@@ -381,7 +377,7 @@ def _run_cells(row):
         assert CLI_SEED_START == 0 or CLI_SEED_START > 0
         assert CLI_SEED_END >= CLI_SEED_START
         assert EXPECTED_SEED_END - EXPECTED_SEED_START + 1 == CLI_SEED_END - CLI_SEED_START + 1
-        os.makedirs(DRIVE_DIR, exist_ok=True)
+        os.makedirs(OUTPUT_DIR, exist_ok=True)
 
         def emitted_seed(raw_seed):
             return raw_seed + 1000001 if MODE == "pilot" else raw_seed
@@ -412,7 +408,7 @@ def _run_cells(row):
         missing_raw = [i for i in range(CLI_SEED_START, CLI_SEED_END + 1)
                        if emitted_seed(i) not in existing]
         print("checkpoint:", len(existing), "rows; missing:", len(missing_raw))
-        print("Drive CSV:", OUTPUT_CSV)
+        print("Local checkpoint CSV:", OUTPUT_CSV)
         """)
     code(cells, config)
     code(cells, textwrap.dedent("""\

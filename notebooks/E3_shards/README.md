@@ -25,8 +25,8 @@ library. No cell needs editing after that generation step. Each notebook
 downloads the upstream `MVBCF_Code.cpp` at run time, sets `TISCA_MVBCF_CPP` to
 that downloaded copy, restores the R bundle, uses `mc.cores = 2`, and runs
 model fits with one thread. The driver appends every completed replication,
-including its `replication_seconds`, to a CSV on Drive and the final cell
-includes the `google.colab.files.download` fallback.
+including its `replication_seconds`, to a CSV under `/content/TISCA_E3`; the
+final cell includes the `google.colab.files.download` fallback.
 
 ## Run order
 
@@ -48,21 +48,20 @@ includes the `google.colab.files.download` fallback.
    confirmatory cell. The four pilot rows have `account_slot=round0` and can
    use any available session after the first pilot and gate check.
 
-If a Colab session dies, re-upload the same notebook. Its Drive checkpoint is
-read before launching `run_cell.R`; existing seed rows are skipped, so the
-same seed range is idempotent and at most the in-flight replication is lost.
-Do not edit the seed range or rename the checkpoint CSV. A duplicate or
-out-of-range checkpoint is rejected loudly so it can be repaired before
-collection.
+These notebooks intentionally assume that each Colab session runs to
+completion. If a session dies, its `/content` CSV is lost and that shard must
+be rerun; the final download is the durable copy. Do not edit the seed range or
+rename the checkpoint CSV during a successful run. A duplicate or out-of-range
+checkpoint is still rejected loudly before collection.
 
 ## Collect the results
 
-Copy the per-shard CSVs from the participating Drives into one local directory,
-preserving the filenames from `shard_table.csv`, then run:
+Copy the downloaded per-shard CSVs into one local directory, preserving the
+filenames from `shard_table.csv`, then run:
 
 ```bash
 python experiments/E3_mvbcf_casestudy/collect_shards.py \
-  --drive-dir /path/to/copied/E3_drive_csvs
+  --drive-dir /path/to/copied/E3_csvs
 ```
 
 The collector asserts every manifest file exists, every shard has the expected
