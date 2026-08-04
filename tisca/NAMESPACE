@@ -1,0 +1,61 @@
+# TISCA v2 R package NAMESPACE.
+# Since modules are plain sourced functions (not roxygen-built), exports are
+# listed explicitly for clarity and for `devtools`/`R CMD INSTALL` installability.
+# The published repo may load entirely with source("R/*.R") OR via this package.
+
+export(tisca_version)
+export("%||%")
+export(power)
+export(power_)
+export(power_m1)
+export(power_m2)
+export(power_m3)
+export(power_m4)
+export(power_m5)
+export(sigma_ub)
+export(solve_mcse_J)
+export(solve_halfwidth_J)
+export(solve_power_J)
+export(combine_J)
+export(pt_dncp)
+
+export(pehe)
+export(cate_mse)
+export(ate_sq_err)
+export(rmse_ate)
+export(ate_cov)
+export(cate_cov)
+export(cil)
+export(cate_bias)
+export(interval_score)
+export(mean_interval_score)
+export(is_perrep_loss)
+export(is_binary_indicator)
+export(is_bounded_proportion)
+
+export(contrast_from_columns)
+export(paired_t)
+export(studentized_paired_bootstrap)
+export(paired_bootstrap_bca)
+export(mcnemar_exact)
+
+export(adj_alpha)
+export(adjust_p_values)
+export(romano_wolf_stepdown)
+export(family_power)
+export(plan_rw_power)
+
+export(reality_check)
+export(spa_test)
+export(spa_stat)
+export(mcs)
+
+export(validate_contrast)
+export(validate_family)
+
+export(make_contrasts)
+export(solve_contrast_J)
+export(run_two_stage)
+export(run_adaptive)
+
+S3method(print, tisca_mcs)

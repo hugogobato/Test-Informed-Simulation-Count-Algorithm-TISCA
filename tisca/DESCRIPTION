@@ -1,0 +1,28 @@
+Package: tisca
+Type: Package
+Title: Test-Informed Simulation Count Algorithm v2
+Version: 2.0.0-dev
+Authors@R: person("H. G.", "Souto", role = c("aut", "cre"),
+                  email = "hugo.souto@example.org")
+Description: R reference implementation of the TISCA v2 two-layer
+    simulation-design protocol (paired two-stage design with precision and
+    power targets, multiplicity-aware planning, and model-confidence-set
+    family inference). R twin of the Python reference; kept in numeric parity
+    via the parity test suite in tisca/tests/ (P2-T2).
+License: MIT
+Encoding: UTF-8
+Depends: R (>= 4.0)
+Imports: stats, parallel, utils
+Suggests:
+    mvtnorm,
+    MCS,
+    testthat
+Collate:
+    'tisca.R'
+    'estimands.R'
+    'inference.R'
+    'mcs.R'
+    'multiplicity.R'
+    'planning.R'
+    'procedure.R'
+    'validate.R'

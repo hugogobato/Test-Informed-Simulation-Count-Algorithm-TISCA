@@ -22,6 +22,12 @@ dist/
 /content/
 .DS_Store
 
+# TISCA parity harness: transient output regenerated on every run.
+# parity_reference.csv is committed (it is the deterministic R reference).
+tisca/tests/parity_computed_python.csv
+tisca/tests/parity_resampling_python.json
+tisca/tests/parity_resampling_spec.json
+
 # Large generated artifacts are committed deliberately under results/ and
 # figures/ (the paper promises them); do not blanket-ignore *.csv here so we
 # do not accidentally hide promised public data.
