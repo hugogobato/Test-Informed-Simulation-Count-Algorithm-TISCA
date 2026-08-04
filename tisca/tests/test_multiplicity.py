@@ -70,13 +70,40 @@ def test_romano_wolf_detects_true_positive():
     assert res["rejections"][0]
 
 
-def test_romano_wolf_at_null_gives_low_false_positive():
-    """Under the global null the smallest adjusted p stays above alpha usually."""
-    rng = np.random.default_rng(0)
-    J, K = 500, 3
-    D = rng.normal(size=(J, K))  # all nulls
-    res = M.romano_wolf_stepdown(D, B=999, alpha=0.05, seed=3)
-    assert res["rejections"].sum() == 0
+def test_romano_wolf_controls_fwer_under_the_global_null():
+    """FWER at the global null is close to alpha -- measured, not asserted once.
+
+    A single draw at alpha = 0.05 rejects about 1 time in 20, so asserting
+    "0 rejections" on one seed tests the seed, not the procedure. Estimate the
+    family-wise rejection rate over independent replications instead.
+    """
+    rng = np.random.default_rng(20260804)
+    reps, J, K, alpha = 300, 200, 4, 0.05
+    any_reject = 0
+    for _ in range(reps):
+        D = rng.normal(size=(J, K))          # all K nulls true
+        res = M.romano_wolf_stepdown(D, B=399, alpha=alpha, seed=int(rng.integers(1 << 30)))
+        any_reject += int(res["rejections"].any())
+    fwer = any_reject / reps
+    mcse = (alpha * (1 - alpha) / reps) ** 0.5
+    assert fwer <= alpha + 4 * mcse, f"FWER {fwer:.3f} exceeds {alpha} by more than 4 MCSE"
+
+
+def test_romano_wolf_is_sign_symmetric():
+    """A family of NEGATIVE contrasts must reject exactly as a positive one does.
+
+    Regression test for the two-sided stepdown: the bootstrap max-statistic is
+    built from |t*|, so it has to be compared against |t_obs|. Comparing it
+    against the signed t_obs made every negative contrast unrejectable -- and
+    in a lower-is-better loss framing "the proposed method wins" is exactly the
+    negative sign, so the whole case-study family came back with p = 1.
+    """
+    rng = np.random.default_rng(11)
+    D = rng.normal(-0.5, 1.0, size=(200, 4))
+    neg = M.romano_wolf_stepdown(D, B=999, alpha=0.05, seed=5)
+    pos = M.romano_wolf_stepdown(-D, B=999, alpha=0.05, seed=5)
+    assert neg["rejections"].sum() == 4
+    np.testing.assert_allclose(neg["p_values"], pos["p_values"])
 
 
 def test_planning_alpha_mapping():

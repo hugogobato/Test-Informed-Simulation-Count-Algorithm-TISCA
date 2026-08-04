@@ -39,11 +39,20 @@ make_resampler <- function(d, B, seed = NULL) {
 
 #' White's Reality Check on a nominated champion against all benchmarks.
 #'
-#' H0: the champion does not beat every benchmark. Statistics on the advantage
-#' vector d_m = L_champ - L_bench_m. T_max = max_m \bar d_m / se(\bar d_m).
-#' Bootstrap null is centered (no advantage), so we resample centred differentials
-#' about 0. Reject H0 => champion beats ALL benchmarks (with the selection
-#' correction built in).
+#' Statistics on the advantage vector d_m = L_bench_m - L_champ (positive =
+#' champion better); T_max = max_m \bar d_m / se(\bar d_m). The bootstrap null
+#' is centred on the sample mean.
+#'
+#' READ THE NULL CAREFULLY. H0 is max_m E[L_bench_m - L_champ] <= 0, i.e. the
+#' champion is (weakly) the WORST of the set. Rejecting it licenses only
+#' "the champion beats AT LEAST ONE benchmark" -- this is a max-type test and it
+#' does not, and cannot, establish dominance over every competitor.
+#'
+#' The positive claim "the champion beats every benchmark" is the
+#' intersection-union statement min_m E[L_bench_m - L_champ] > 0, established by
+#' rejecting ALL K paired contrasts under FWER control
+#' (`romano_wolf_stepdown`), not by this test. Section 3.6 of the manuscript
+#' must state it that way.
 #'
 #' @param L J x M loss matrix
 #' @param champ index or name of the champion model
@@ -81,8 +90,12 @@ reality_check <- function(L, champ, B = 999L, seed = NULL) {
 
 ## ---- Hansen's SPA --------------------------------------------------------------
 
-#' Hansen's SPA test that the proposed model beats all benchmarks.
-#' Uses the centred bootstrap for the null and Hansen's sample-variance estimate.
+#' Hansen's SPA: the studentized max-type test on paired loss differentials.
+#' Same null and same interpretation caveat as `reality_check` above -- it is
+#' NOT a test that the champion beats all benchmarks.
+#' Uses full recentring (Hansen's liberal SPA_l, equivalently the studentized
+#' Reality Check) and Hansen's sample-variance estimate. SPA_l is an upper bound
+#' on the SPA_c p-value, so it is conservative for rejection; report the variant.
 #' Kept dependency-free so it works identically in R and Python; the CRAN `MCS`
 #' package is only a unit-test oracle.
 #'

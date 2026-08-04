@@ -9,9 +9,15 @@ International Journal of Data Science and Analytics (major revision, 2026).
 This repository hosts the **TISCA v2** code, experiments, results, and figures
 that accompany the revised manuscript, together with an auditable environment
 specification. The **original v1** submission code is preserved, untouched, under
-[`legacy/`](legacy/README.md) for audit; the revision restructured the project
-so that everything the paper claims is publicly available is here, reproducible
-from committed seeds.
+[`legacy/`](legacy/README.md) for audit.
+
+> **Status: revision in progress.** The v2 layout, the specifications in
+> [`docs/`](docs/README.md) and the environment files are in place; the v2
+> package, the re-run experiments and the results are landing in phases. Until
+> a phase lands, its directory holds only its specification. Anything published
+> as a result of the revision will be reproducible from the committed seeds
+> under the protocol in [`docs/seed_rng_protocol.md`](docs/seed_rng_protocol.md);
+> the **v1** results in `legacy/` are not, and that is documented there.
 
 ## What TISCA v2 is
 
@@ -51,6 +57,7 @@ experiments/
 results/                # committed CSVs, one per experiment, versioned
 figures/                # figures emitted by experiments
 docs/                   # specs: estimand table, TISCA v2 spec, seed/RNG protocol
+env/                    # R dependency installer (renv.lock arrives with P0-T4)
 notebooks/              # Colab notebooks (library bundle, pilots, shards)
 legacy/                 # v1 submission code, preserved for audit (read-only mindset)
 LICENSE                 # MIT
@@ -58,27 +65,39 @@ LICENSE                 # MIT
 
 ## Environment
 
-- **R:** see `renv.lock` (R 4.3.3 baseline). On Google Colab the heavy packages
+- **R:** `env/install_R_dependencies.R` is the current source of truth (R 4.3.3
+  baseline). A genuine `renv.lock` with pinned versions is emitted by the P0-T4
+  bundle build (`renv::snapshot()` over the built library) and committed once
+  the bundle exists — a lockfile without resolved versions would fail
+  `renv::restore()`, so none is committed before then. On Google Colab the heavy packages
   (`stochtree`, `dbarts`, `bartCause`, `skewBART`, `mvbcf`, `mvtnorm`,
   `scoringRules`, `matrixStats`, `progress`, `MCS`) are precompiled into a
   single library bundle and restored in seconds: see the
   `notebooks/P0T4_build_rlib_bundle.ipynb` notebook and the seed/RNG protocol.
 - **Python:** see `environment.yml` and `requirements.txt`.
 
-Every experiment records its seeds per replication (`seed_data`, `seed_fit`)
-and its model-fitting stream is kept separate from its data-generation stream,
-per `docs/seed_rng_protocol.md`. Shards assert seed completeness (no gaps, no
-duplicates) when concatenated, so `run_all.sh` reproduces every committed number
-from raw seeds.
+Every experiment records its seeds per replication and keeps its model-fitting
+stream separate from its data-generation stream, per
+[`docs/seed_rng_protocol.md`](docs/seed_rng_protocol.md). Shards assert seed
+completeness (no gaps, no duplicates) when concatenated.
 
 ## Reproducibility
 
-`make all` (or [`run_all.sh`]) regenerates the results and figures in this
-repository end to end from committed seeds. The MVBCF case study reproduces the
-published Table 2 of McJames et al. within Monte Carlo tolerance after the
-`stochtree::bcf` benchmark is calibrated (see
-`experiments/E3_mvbcf_casestudy/CALIBRATION.md`); the original authors' code is
-linked from the paper and the methods, not copied here.
+`./run_all.sh` is the single entry point. It currently validates the repository
+skeleton and the Python package import; each experiment attaches a sub-target to
+it as that experiment lands, and the goal it is written against is that a fresh
+clone regenerates every number in the paper from the committed seeds.
+
+Two things that are **not** yet established, and are tracked in
+[`experiments/E3_mvbcf_casestudy/CALIBRATION.md`](experiments/E3_mvbcf_casestudy/CALIBRATION.md):
+
+- whether the `stochtree::bcf` benchmark reproduces the published Table 2 of
+  McJames et al. within Monte Carlo tolerance (the calibration gate — no
+  confirmatory replication runs until it passes);
+- the seed-protocol acceptance test on the real driver.
+
+The original authors' code is linked from the paper and the methods, not copied
+here.
 
 ## Citation
 

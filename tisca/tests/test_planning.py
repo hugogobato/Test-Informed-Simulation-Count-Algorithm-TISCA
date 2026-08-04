@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+from scipy import stats
 from scipy.stats import nct
 
 from tisca import planning as P
@@ -213,14 +214,27 @@ def test_power_function_dispatch_edge_cases():
         P.power_function("M6", 50, 0.5, 1.0, alpha=0.05)
 
 
-def test_halfwidth_early_and_tail_fallback():
-    """Half-width solver returns 1 for tiny sigma and J_max for unreachable hw."""
-    assert P.required_J_halfwidth(1.0, 5.0, 0.05) == 1  # sigma < halfwidth
+def test_halfwidth_solver_meets_the_target_it_returns():
+    """The returned J must actually achieve the half-width, and be the smallest.
+
+    Regression test. The solver used to short-circuit to ``J = 1`` whenever
+    ``sigma < halfwidth``, which compares the wrong quantity: the achieved
+    half-width is ``t_{1-a/2, J-1} sigma / sqrt(J)``, and at ``J = 2`` that
+    carries a factor of ``t_{0.975,1}/sqrt(2) ~ 9``. sigma = 0.9 with a target
+    of 1.0 was returned as J = 1 with a true half-width of 11.4.
+    """
+    def achieved(sigma, j, alpha=0.05):
+        return float(stats.t.ppf(1 - alpha / 2, df=j - 1) * sigma / np.sqrt(j))
+
+    for sigma, h in [(0.9, 1.0), (1.0, 5.0), (0.5, 0.6), (2.0, 3.0), (50.0, 0.5), (1.0, 0.1)]:
+        j = P.required_J_halfwidth(sigma, h, 0.05)
+        assert j >= 2, (sigma, h, j)
+        assert achieved(sigma, j) <= h, (sigma, h, j, achieved(sigma, j))
+        if j > 2:                              # and no smaller J would do
+            assert achieved(sigma, j - 1) > h, (sigma, h, j)
+
     with pytest.raises(validate.ValidationError):
         P.required_J_halfwidth(1.0, 0.0, 0.05)
-    # A very tight half-width relative to sigma pushes past the coarse scan.
-    j = P.required_J_halfwidth(50.0, 0.5, 0.05)
-    assert j > 2
 
 
 def test_required_J_power_edge_cases():

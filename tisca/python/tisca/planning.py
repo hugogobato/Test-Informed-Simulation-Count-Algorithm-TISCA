@@ -28,6 +28,7 @@ from scipy.stats import nct, t as _t, norm as _norm, chi2 as _chi2
 from . import validate
 
 __all__ = [
+    "nct_cdf",
     "power_M1",
     "power_M2",
     "power_M3",
@@ -57,6 +58,37 @@ def _ncp(J, delta, sigma):
     return float(np.sqrt(J) * delta / sigma)
 
 
+def nct_cdf(x, df, nc):
+    """Noncentral-t CDF, NaN-safe in the far tail.
+
+    ``scipy.stats.nct.cdf`` returns ``NaN`` instead of an underflowed ~0 once
+    ``|nc|`` gets large (e.g. ``nct.cdf(-1.96, 499, 17.9)``), which silently
+    poisons two-sided power and can make a monotone ``J`` search terminate at
+    the wrong point. R's ``pt(q, df, ncp)`` returns the correct value, so the
+    R port never saw this; the R<->Python parity run flagged 28 such configs.
+
+    Where SciPy returns a non-finite value, fall back to the Johnson-Welch
+    normal approximation
+    ``Phi( (x(1 - 1/(4 df)) - nc) / sqrt(1 + x^2/(2 df)) )``,
+    which is accurate to a few 1e-4 in the region where SciPy fails and is
+    exactly the ~0 / ~1 limit deep in the tail.
+    """
+    x = np.asarray(x, dtype=float)
+    df = np.asarray(df, dtype=float)
+    nc = np.asarray(nc, dtype=float)
+    with np.errstate(invalid="ignore", divide="ignore", over="ignore"):
+        out = np.asarray(nct.cdf(x, df=df, nc=nc), dtype=float)
+        bad = ~np.isfinite(out)
+        if np.any(bad):
+            xb, dfb, ncb = np.broadcast_arrays(x, df, nc)
+            approx = _norm.cdf(
+                (xb * (1.0 - 1.0 / (4.0 * dfb)) - ncb)
+                / np.sqrt(1.0 + xb ** 2 / (2.0 * dfb))
+            )
+            out = np.where(bad, approx, out)
+    return out if out.ndim else float(out)
+
+
 def power_M1(J, delta, sigma, alpha) -> float:
     """M1 two-sided equality ``H0: theta = 0``.
 
@@ -69,7 +101,7 @@ def power_M1(J, delta, sigma, alpha) -> float:
     nc = _ncp(J, delta, sigma) if sigma > 0 else 0.0
     if sigma == 0.0:
         return 1.0
-    return float(1.0 - (nct.cdf(crit, df=df, nc=nc) - nct.cdf(-crit, df=df, nc=nc)))
+    return float(1.0 - (nct_cdf(crit, df, nc) - nct_cdf(-crit, df, nc)))
 
 
 def power_M2(J, delta, sigma, alpha) -> float:
@@ -83,7 +115,7 @@ def power_M2(J, delta, sigma, alpha) -> float:
     if sigma == 0.0:
         return 1.0 if delta < 0 else alpha
     nc = _ncp(J, delta, sigma)
-    return float(nct.cdf(crit, df=df, nc=nc))
+    return float(nct_cdf(crit, df, nc))
 
 
 def power_M3(J, delta, margin, sigma, alpha) -> float:
@@ -97,7 +129,7 @@ def power_M3(J, delta, margin, sigma, alpha) -> float:
     if sigma == 0.0:
         return 1.0 if delta < -margin else alpha
     nc = _ncp(J, delta + margin, sigma)
-    return float(nct.cdf(crit, df=df, nc=nc))
+    return float(nct_cdf(crit, df, nc))
 
 
 def power_M4(J, delta, margin, sigma, alpha) -> float:
@@ -111,7 +143,7 @@ def power_M4(J, delta, margin, sigma, alpha) -> float:
     if sigma == 0.0:
         return 1.0 if delta < margin else alpha
     nc = _ncp(J, delta - margin, sigma)
-    return float(nct.cdf(crit, df=df, nc=nc))
+    return float(nct_cdf(crit, df, nc))
 
 
 def power_M5_approx(J, delta, margin, sigma, alpha) -> float:
@@ -216,20 +248,35 @@ def required_J_halfwidth(sigma, halfwidth, alpha, J_max=_DEFAULT_J_MAX) -> int:
     """
     if halfwidth <= 0:
         raise validate.ValidationError("halfwidth must be positive.")
-    if sigma <= 0 or sigma < halfwidth:
-        return 1
-    J = 2
-    while J * 4 <= J_max:
-        crit = _t.ppf(1.0 - alpha / 2.0, df=J - 1.0)
-        if crit * sigma / np.sqrt(J) <= halfwidth:
-            return J
-        J += 1
-    # Fall back to a finer scan over the tail.
-    for jj in range(J, J_max + 1):
-        crit = _t.ppf(1.0 - alpha / 2.0, df=jj - 1.0)
-        if crit * sigma / np.sqrt(jj) <= halfwidth:
-            return jj
-    return J_max
+    if sigma <= 0:
+        return 2
+    # The smallest admissible J is 2 (df = J-1 >= 1); at J = 1 the t quantile is
+    # undefined. `sigma < halfwidth -> J = 1` was a short circuit on the WRONG
+    # comparison: it is the achieved half-width t_{1-a/2,J-1} sigma/sqrt(J), not
+    # sigma itself, that must fall under the target, and at J = 2 that carries a
+    # factor t_{0.975,1}/sqrt(2) ~ 9. E.g. sigma = 0.9, h = 1.0 returned J = 1
+    # with a true half-width of 11.4.
+    #
+    # t_{1-a/2,J-1} sigma/sqrt(J) is strictly decreasing in J, so bisect on the
+    # first J that meets the target instead of scanning (the scan was O(J_max)
+    # with a redundant second pass over the same range).
+    def _hw(j):
+        return float(_t.ppf(1.0 - alpha / 2.0, df=j - 1.0) * sigma / np.sqrt(j))
+
+    if _hw(2) <= halfwidth:
+        return 2
+    lo, hi = 2, 4
+    while hi < J_max and _hw(hi) > halfwidth:
+        lo, hi = hi, min(hi * 2, J_max)
+    if _hw(hi) > halfwidth:
+        return J_max        # target not reachable within the budget
+    while lo + 1 < hi:
+        mid = (lo + hi) // 2
+        if _hw(mid) <= halfwidth:
+            hi = mid
+        else:
+            lo = mid
+    return hi
 
 
 def required_J_power(

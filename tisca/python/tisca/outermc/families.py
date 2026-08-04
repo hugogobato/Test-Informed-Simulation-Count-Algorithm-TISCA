@@ -43,14 +43,27 @@ def _gauss_z(rng, size, rho):
     return rng.multivariate_normal(np.zeros(2), cov, size=size)
 
 
-def _standardise_scaled(block, sigma_a, sigma_b, theta):
-    """Standardise the two marginal columns to target sigma and E[D] = theta."""
-    a = block[..., 0]
-    b = block[..., 1]
-    sa = a.std(axis=-1, keepdims=True)
-    sb = b.std(axis=-1, keepdims=True)
-    a = (a - a.mean(axis=-1, keepdims=True)) / (sa + 1e-12)
-    b = (b - b.mean(axis=-1, keepdims=True)) / (sb + 1e-12)
+def _standardise_scaled(block, sigma_a, sigma_b, theta, moments=None):
+    """Standardise the two marginal columns to target sigma and ``E[D] = theta``.
+
+    **The centring and scaling constants must be POPULATION constants, not the
+    per-repetition sample mean and sd.** Standardising each repetition by its own
+    ``mean(axis=-1)`` / ``std(axis=-1)`` forces ``mean(L_A) == mean(L_B) == 0``
+    *within every repetition*, hence ``D_bar == theta`` exactly in every
+    repetition: the sampling variability of the estimator is removed. The paired
+    t statistic then collapses to ``sqrt(J) theta / s_D``, so at ``theta = 0``
+    the measured Type I error is exactly 0 and CI coverage exactly 1 -- for the
+    lognormal, gamma, beta and t3 families, i.e. four of the seven. Those are
+    precisely the families the P3-T4 skewness sub-study reads.
+
+    ``moments`` is the ``(mean, sd)`` pair of the *marginal law*, computed once in
+    ``_MOMENTS`` by high-accuracy quadrature/closed form.
+    """
+    if moments is None:
+        raise ValueError("population (mean, sd) required; per-sample standardisation is invalid")
+    mu, sd = moments
+    a = (block[..., 0] - mu) / sd
+    b = (block[..., 1] - mu) / sd
     out = np.stack([a, b], axis=-1)
     out[..., 0] *= sigma_a
     out[..., 1] *= sigma_b
@@ -58,15 +71,65 @@ def _standardise_scaled(block, sigma_a, sigma_b, theta):
     return out
 
 
+def _marginal_moments(family):
+    """Population ``(mean, sd)`` of each family's marginal, on the raw transform scale."""
+    if family == "lognormal":            # exp(0.5 Z), Z ~ N(0,1) -> lognormal(0, 0.5)
+        s2 = 0.25
+        m = np.exp(s2 / 2.0)
+        v = (np.exp(s2) - 1.0) * np.exp(s2)
+        return float(m), float(np.sqrt(v))
+    if family == "gamma":                # Gamma(shape=2, scale=1)
+        return 2.0, float(np.sqrt(2.0))
+    if family == "t3":                   # Student t, 3 df: mean 0, var = 3/(3-2)
+        return 0.0, float(np.sqrt(3.0))
+    if family == "beta":                 # Beta with mean .96, sd .02 (coverage-like)
+        return 0.96, 0.02
+    raise ValueError(f"no population moments registered for family {family!r}")
+
+
+_MOMENTS = {f: _marginal_moments(f) for f in ("lognormal", "gamma", "t3", "beta")}
+
+# Families whose *marginal* is skewed/heavy-tailed. Applying the same marginal to
+# both methods and coupling them with an exchangeable Gaussian copula makes the
+# pair (L_A, L_B) exchangeable when sigma_a == sigma_b, and an exchangeable pair
+# has a SYMMETRIC difference: skew(D) is then identically 0, whatever the
+# marginal. The P3-T4 sub-study measures Type I error AGAINST the standardised
+# third moment of D, so it needs cells where that moment is non-zero.
+#
+# `asym = True` (the default) therefore applies the skewed marginal to method A
+# only and gives method B a normal marginal of matching variance -- the same
+# device the `mix` family already used, and a realistic scenario ("one method
+# occasionally does much worse than the other"). Set `asym = False` to recover
+# the exchangeable construction, which is a useful null case: it should show
+# essentially nominal Type I error at every J.
 _parametric = ["normal", "lognormal", "gamma", "mix", "beta", "t3"]
+_SKEWED = ("lognormal", "gamma", "beta", "t3")
+
+
+def _family_marginal(family, u, z):
+    """Map copula uniforms ``u`` (and z-scores ``z``) onto the family's marginal."""
+    if family == "t3":
+        return stats.t.ppf(stats.norm.cdf(z), df=3)
+    if family == "lognormal":
+        return np.exp(0.5 * stats.norm.ppf(u))
+    if family == "gamma":
+        return stats.gamma.ppf(u, a=2.0)
+    if family == "beta":
+        mu, sd = 0.96, 0.02
+        alb = (mu * (1 - mu)) / (sd * sd) - 1.0
+        return stats.beta.ppf(u, mu * alb, (1 - mu) * alb)
+    raise ValueError(f"no marginal registered for family {family!r}")
 
 
 def sample_batch(family, R, J, rho=0.0, sigma_a=1.0, sigma_b=1.0, theta=0.0,
-                 matrix=None, rng=None, master_seed=None):
+                 matrix=None, rng=None, master_seed=None, asym=True):
     """Draw ``(R, J, 2)`` paired losses for one family in one vectorised call.
 
     ``rng`` is a ``numpy.random.Generator``; if omitted a generator is seeded from
     ``master_seed`` (via a SeedSequence) so the block is reproducible and resumable.
+    ``asym`` controls whether a skewed family is applied to method A only (the
+    default, which gives a skewed contrast ``D``) or to both marginals (which
+    makes the pair exchangeable and forces ``skew(D) = 0``); see ``_SKEWED``.
     """
     if rng is None:
         ss = np.random.SeedSequence(master_seed)
@@ -75,9 +138,6 @@ def sample_batch(family, R, J, rho=0.0, sigma_a=1.0, sigma_b=1.0, theta=0.0,
     if family == "normal":
         block = np.stack([z[..., 0] * sigma_a, z[..., 1] * sigma_b - theta], axis=-1)
         return block
-    if family == "t3":
-        x = stats.t.ppf(stats.norm.cdf(z), df=3)
-        return _standardise_scaled(x, sigma_a, sigma_b, theta)
     if family == "mix":
         block = np.stack([z[..., 0] * sigma_a, z[..., 1] * sigma_b - theta], axis=-1)
         cat = rng.uniform(size=(R, J)) < 0.02
@@ -85,25 +145,41 @@ def sample_batch(family, R, J, rho=0.0, sigma_a=1.0, sigma_b=1.0, theta=0.0,
         sign = rng.choice([-1.0, 1.0], size=(R, J))
         block[..., 1] += np.where(cat, sign * mag, 0.0)
         return block
-    u = stats.norm.cdf(z)                              # Gaussian copula uniforms
-    if family == "lognormal":
-        x = np.exp(0.5 * stats.norm.ppf(u))
-        return _standardise_scaled(x, sigma_a, sigma_b, theta)
-    if family == "gamma":
-        x = stats.gamma.ppf(u, a=2.0)
-        return _standardise_scaled(x, sigma_a, sigma_b, theta)
-    if family == "beta":
-        mu, sd = 0.96, 0.02
-        alb = (mu * (1 - mu)) / (sd * sd) - 1.0
-        a, b = mu * alb, (1 - mu) * alb
-        x = stats.beta.ppf(u, a, b)
-        return _standardise_scaled(x, sigma_a, sigma_b, theta)
     if family == "empirical":
         if matrix is None or matrix.shape[1] != 2:
             raise ValueError("empirical family requires a (M, 2) loss matrix")
         idx = rng.integers(0, matrix.shape[0], size=(R, J))
         return matrix[idx]
+    if family in _SKEWED:
+        u = stats.norm.cdf(z)                          # Gaussian copula uniforms
+        x = _family_marginal(family, u, z)
+        block = _standardise_scaled(x, sigma_a, sigma_b, theta, moments=_MOMENTS[family])
+        if asym:
+            # Method B keeps the standard-normal marginal implied by the same
+            # copula draw, so it has the identical variance and the identical
+            # rank dependence with A -- only the SHAPE differs, and D inherits
+            # A's skewness. Without this the difference of two exchangeable
+            # marginals is symmetric and the skewness factor is inert.
+            block[..., 1] = z[..., 1] * sigma_b - theta
+        return block
     raise ValueError(f"unknown family {family!r}; choose from {sorted(FAMILIES)}")
+
+
+def contrast_skewness(family, rho=0.0, sigma_a=1.0, sigma_b=1.0, asym=True,
+                      n=400_000, seed=0):
+    """Standardised third moment of ``D = L_A - L_B`` for a family/rho cell.
+
+    This is the x-axis of the P3-T4 figure ("Type I error vs skewness of D_j"),
+    so it has to be reported per cell rather than assumed. Estimated once by a
+    large independent draw; its own MCSE is ``~sqrt(6/n)``.
+    """
+    b = sample_batch(family, 1, n, rho=rho, sigma_a=sigma_a, sigma_b=sigma_b,
+                     theta=0.0, master_seed=seed, asym=asym,
+                     matrix=None if family != "empirical" else np.zeros((2, 2)))
+    d = b[0, :, 0] - b[0, :, 1]
+    d = d - d.mean()
+    s = d.std()
+    return float(np.mean(d ** 3) / s ** 3) if s > 0 else 0.0
 
 
 def sample_pairs(family, n, rho=0.0, sigma_a=1.0, sigma_b=1.0, theta=0.0,
@@ -118,7 +194,8 @@ def sample_pairs(family, n, rho=0.0, sigma_a=1.0, sigma_b=1.0, theta=0.0,
 
 
 def draw_rep_losses(family, R, J, rho=0.0, sigma_a=1.0, sigma_b=1.0, theta=0.0,
-                    matrix=None, master_seed=0):
+                    matrix=None, master_seed=0, asym=True):
     """Vectorised ``(R, J, 2)`` draw seeded via SeedSequence``master_seed``."""
     return sample_batch(family, R, J, rho=rho, sigma_a=sigma_a, sigma_b=sigma_b,
-                        theta=theta, matrix=matrix, master_seed=master_seed)
+                        theta=theta, matrix=matrix, master_seed=master_seed,
+                        asym=asym)

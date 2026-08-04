@@ -56,10 +56,15 @@ package plan:
 | `progress` | CRAN | driver progress bars |
 | `MCS` | CRAN | cross-check oracle for the v2 MCS layer |
 
-GitHub packages are pinned by `remotes::install_github` to a specific commit.
-CRAN packages install at the repo's current resolution; the exact installed
-versions are captured verbatim in `sessionInfo.txt` and `DEPENDENCIES.csv`
-inside the bundle, which is what the paper reports (IJDA #14a).
+Neither the CRAN nor the GitHub packages are pinned *at install time* — they
+resolve to whatever is current when this notebook runs. **Reproducibility comes
+from the artefact, not from the install command:** the bundle is built once and
+all ~33 worker sessions restore that same tarball, so every shard uses
+byte-identical package builds. What has to be recorded is therefore what was
+actually resolved, and Cell 6 captures it three ways — `sessionInfo.txt`,
+`DEPENDENCIES.csv` (with the `RemoteSha` of each GitHub package) and a real
+`renv.lock` — which is what the paper reports (IJDA #14a) and what lets a reader
+rebuild the same environment later.
 """))
 
 # ---------------------------------------------------------------------------
@@ -208,8 +213,19 @@ print("GitHub packages installed")
 # ---------------------------------------------------------------------------
 md(textwrap.dedent("""\
 ## Cell 6 — Record the exact environment + versions into the bundle
-The paper reports exact package versions (IJDA #14a). We write two manifest
-files and move them next to `rlib` so they are archived together.
+The paper reports exact package versions (IJDA #14a). We write three manifests
+next to `rlib` so they are archived with it:
+
+- `DEPENDENCIES.csv` — package, version, and the `RemoteSha` for the two GitHub
+  packages, which is the only thing that identifies *which* `skewBART`/`mvbcf`
+  was used;
+- `sessionInfo.txt` — the verbatim R session;
+- `renv.lock` — a **real** lockfile produced by `renv::snapshot()` over the
+  built library. This is the file to commit to the repository root, replacing
+  `env/install_R_dependencies.R` as the source of truth. A lockfile written by
+  hand without resolved versions is not valid and fails `renv::restore()`,
+  which is why the repository carries the installer script until this cell has
+  run.
 """))
 
 code(textwrap.dedent("""\
@@ -221,22 +237,42 @@ manifest = (
     '.libPaths(c(' + LB + ', .libPaths()))\\n' +
     'options(repos = c(CRAN = "https://cloud.r-project.org"))\\n' +
     'ip <- installed.packages(lib.loc = ' + LB + ')\\n' +
-    'd <- data.frame(pkg=ip[,"Package"], version=ip[,"Version"], stringsAsFactors=FALSE)\\n' +
+    'pk <- ip[, "Package"]\\n' +
+    'sha <- vapply(pk, function(p) {\\n' +
+    '  d <- packageDescription(p, lib.loc = ' + LB + ')\\n' +
+    '  if (!is.null(d$RemoteSha)) d$RemoteSha else NA_character_ }, character(1))\\n' +
+    'd <- data.frame(pkg=pk, version=ip[,"Version"], remote_sha=unname(sha),\\n' +
+    '                stringsAsFactors=FALSE)\\n' +
     'write.csv(d[order(d$pkg),], "/content/rlib_DEPENDENCIES.csv", row.names=FALSE)\\n' +
     'sink("/content/rlib_sessionInfo.txt")\\n' +
     'sessionInfo()\\n' +
     'sink()\\n' +
+    '# a genuine lockfile, snapshotted from what was actually installed\\n' +
+    'if (!requireNamespace("renv", quietly=TRUE))\\n' +
+    '  install.packages("renv", lib=' + LB + ', quiet=TRUE)\\n' +
+    'ok <- tryCatch({\\n' +
+    '  renv::snapshot(library = ' + LB + ', lockfile = "/content/rlib_renv.lock",\\n' +
+    '                 type = "all", prompt = FALSE); TRUE\\n' +
+    '}, error = function(e) { cat("renv::snapshot failed:", conditionMessage(e), "\\\\n"); FALSE })\\n' +
+    'cat("RENV_LOCK_WRITTEN:", ok, "\\\\n")\\n' +
     'cat("MANIFEST_WRITTEN\\\\n")\\n'
 )
 with open("/content/write_manifest.R", "w") as f:
     f.write(manifest)
 res = subprocess.run(["Rscript", "/content/write_manifest.R"], capture_output=True, text=True)
-print(res.stdout[-1200:])
+print(res.stdout[-2000:])
 if "MANIFEST_WRITTEN" not in res.stdout:
     print("STDERR:", res.stderr[-1500:])
     raise SystemExit("manifest not written")
+print("--- DEPENDENCIES.csv ---")
+print(open("/content/rlib_DEPENDENCIES.csv").read())
 print("--- sessionInfo.txt (head) ---")
 print(open("/content/rlib_sessionInfo.txt").read()[:1200])
+if os.path.exists("/content/rlib_renv.lock"):
+    print("--- renv.lock written; commit this to the repo root ---")
+else:
+    print("!! renv.lock NOT written: keep env/install_R_dependencies.R as the "
+          "source of truth and say so in the paper.")
 """))
 
 # ---------------------------------------------------------------------------
@@ -272,6 +308,8 @@ with open(os.path.join(BUNDLE_DIR,"BUNDLE_META.json"), "w") as f:
 subprocess.run(["cp","-r",RLIB, BUNDLE_DIR+"/rlib"])
 subprocess.run(["cp","/content/rlib_DEPENDENCIES.csv", BUNDLE_DIR+"/DEPENDENCIES.csv"])
 subprocess.run(["cp","/content/rlib_sessionInfo.txt", BUNDLE_DIR+"/sessionInfo.txt"])
+if os.path.exists("/content/rlib_renv.lock"):
+    subprocess.run(["cp","/content/rlib_renv.lock", BUNDLE_DIR+"/renv.lock"])
 
 res = subprocess.run(["tar","czf",TAR,"-C","/content","tisca_rlib"],
                      capture_output=True, text=True)
@@ -323,46 +361,50 @@ md(textwrap.dedent("""\
 restores it and loads `stochtree`, `dbarts`, `bartCause`, `skewBART` and
 `mvtnorm` in under 90 seconds, with zero compilation.
 
-Set `URL` to the direct-download link of `tisca_rlib.tar.gz` (Drive share link
-or GitHub release asset) and run. It verifies the SHA256, restores into
-`/content/tisca_rlib/rlib`, and times `requireNamespace` on the gate packages.
+**Run this cell in a FRESH runtime on an account that did not build the bundle.**
+That is the whole point of the test, and it means the cell may not read anything
+left behind by the build: paste both the `URL` and the `SHA256` printed by
+Cell 7 into the two constants below. It downloads, verifies the SHA256, restores
+into `/content/tisca_rlib/rlib`, and times `requireNamespace` on the gate
+packages.
 """))
 
 code(textwrap.dedent("""\
 import subprocess, os, time, urllib.request, hashlib
 
-URL = ""   # <-- paste the direct link to tisca_rlib.tar.gz
+# Both constants come from Cell 7's output. A fresh account has neither the
+# tarball nor the .sha256 file on disk, so they must be pasted, not read.
+URL    = ""   # <-- direct download link to tisca_rlib.tar.gz
+SHA256 = ""   # <-- the SHA256 Cell 7 printed
 
-if not URL:
-    raise SystemExit("Set URL to the direct download link of tisca_rlib.tar.gz")
+if not URL or not SHA256:
+    raise SystemExit("Paste both URL and SHA256 from Cell 7 before running the "
+                     "acceptance test.")
 
 DEST = "/content"
-TARBALL = "/content/tisca_rlib.tar.gz"
 LIBDIR = "/content/tisca_rlib/rlib"
-sha_expected = open("/content/tisca_rlib.sha256").read().strip()
+DL = "/content/_dl_tisca_rlib.tar.gz"
 
-# -- obtain the tarball (fresh download preferred; fall back to local build) --
-if os.path.exists(TARBALL) and os.path.getsize(TARBALL) > 0 and URL:
-    if not os.path.exists("/content/_dl_tisca_rlib.tar.gz"):
-        print("reusing locally built tarball")
-    tarball_use = TARBALL
-else:
-    t0 = time.time()
-    urllib.request.urlretrieve(URL, "/content/_dl_tisca_rlib.tar.gz")
-    print("downloaded in %.1fs" % (time.time()-t0))
-    tarball_use = "/content/_dl_tisca_rlib.tar.gz"
+# -- always download: reusing a locally built tarball would not test the thing
+#    the acceptance criterion is about (a fresh session restoring from the URL).
+t0 = time.time()
+urllib.request.urlretrieve(URL, DL)
+dl_s = time.time() - t0
+print("downloaded in %.1fs (%.1f MB)" % (dl_s, os.path.getsize(DL)/1e6))
 
 # -- integrity --
-h = hashlib.sha256(open(tarball_use, "rb").read()).hexdigest()
-assert h == sha_expected, "SHA mismatch %s vs %s" % (h, sha_expected)
+h = hashlib.sha256(open(DL, "rb").read()).hexdigest()
+assert h == SHA256, "SHA mismatch %s vs %s" % (h, SHA256)
 print("SHA256 OK")
 
 # -- restore: exactly what a worker shard will run --
+t1 = time.time()
 if os.path.exists(LIBDIR):
-    subprocess.run(["rm","-rf",LIBDIR])
-subprocess.run(["tar","xzf",tarball_use,"-C",DEST])
+    subprocess.run(["rm","-rf","/content/tisca_rlib"])
+subprocess.run(["tar","xzf",DL,"-C",DEST])
 assert os.path.isdir(LIBDIR), "restore failed: %s missing" % LIBDIR
-print("restored:", LIBDIR)
+print("restored in %.1fs: %s" % (time.time()-t1, LIBDIR))
+print("download + restore so far: %.1fs of the 90 s budget" % (time.time()-t0))
 
 check = (
     '.libPaths(c("' + LIBDIR + '", .libPaths()))\\n' +
@@ -395,11 +437,19 @@ md(textwrap.dedent("""\
 - [ ] Cell 7 produced `tisca_rlib.tar.gz` + `tisca_rlib.sha256`.
 - [ ] You published the tarball to a **Drive share link** or a **GitHub release
       asset** on `Test-Informed-Simulation-Count-Algorithm-TISCA`.
-- [ ] Cell 9, run on an account that **did not** build the bundle, restored it
-      and loaded all gate packages in **under 90 s**.
+- [ ] Cell 9, run in a **fresh runtime on an account that did not build the
+      bundle**, with `URL` and `SHA256` pasted from Cell 7, downloaded and
+      restored the bundle and loaded all gate packages in **under 90 s**.
+      Running Cell 9 in the build session does not count — it would only prove
+      that a local file untars.
 - [ ] You recorded the direct `URL`, the explicit `sessionInfo()` (captured in
       the bundle as `sessionInfo.txt`), and any install deviations in
       `experiments/E3_mvbcf_casestudy/CALIBRATION.md`.
+- [ ] `renv.lock` from Cell 6 is committed to the repository root, and
+      `env/install_R_dependencies.R` now points at it.
+- [ ] `DEPENDENCIES.csv` carries a non-`NA` `remote_sha` for `skewBART` and
+      `mvbcf` — without it, "which version of the GitHub package" is
+      unanswerable and IJDA #14a is not satisfied.
 
 Once this passes, the worker shards (Phase 1+) start with a short
 `restore_lib()` helper: `wget <URL> && tar xzf && .libPaths(<dest>/tisca_rlib/rlib)`.

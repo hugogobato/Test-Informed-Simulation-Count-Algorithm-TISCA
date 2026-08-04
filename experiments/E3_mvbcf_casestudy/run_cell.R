@@ -111,6 +111,26 @@ make_streams <- function(master, j_from, j_to) {
 
 set_rand <- function(x) assign(".Random.seed", x, envir = .GlobalEnv)
 
+# Per-model substream of a replication's fit stream. Resetting the RNG to the
+# SAME state before every model (which is what an unqualified
+# `set_rand(f_stream)` does) makes each model draw the identical seed and share
+# one state, so `model_seed_*` is constant across models and the two BCF
+# outcome fits run on the same stream. Advancing the fit stream by `i`
+# L'Ecuyer substreams gives every model its own independent, reproducible
+# stream while keeping each fit independent of what ran before it.
+model_stream <- function(f_stream, i) {
+  s <- f_stream
+  if (i > 0L) for (k in seq_len(i)) s <- nextRNGStream(s)
+  s
+}
+# Fixed substream index per model, so a re-run of any single model is exact.
+MODEL_SUBSTREAM <- c(propensity = 0L, mvbcf = 1L, bcf1 = 2L, bcf2 = 3L,
+                     bart1 = 4L, bart2 = 5L, mvbart = 6L)
+use_model_stream <- function(f_stream, name) {
+  set_rand(model_stream(f_stream, MODEL_SUBSTREAM[[name]]))
+  sample.int(.Machine$integer.max, 1L)
+}
+
 # -----------------------------------------------------------------------------
 # DGP generation. Formulas VERBATIM from GitHub_DGP1.R (44-98), GitHub_DGP2.R
 # (43-98), GitHub_DGP3.R (43-98).
@@ -281,12 +301,16 @@ run_one <- function(seed_emit, d_stream, f_stream, out_path) {
   # ---- propensity score (from here on, the fit stream) ----
   set_rand(f_stream)
   row[["seed_fit_hash"]] <- paste(.Random.seed, collapse = "_")
-  f_seed <- sample.int(.Machine$integer.max, 1L)
+  f_seed <- use_model_stream(f_stream, "propensity")
   row[["model_seed_propensity"]] <- f_seed
+  # GitHub_DGP1.R:101 calls bart(x.train, y.train, x.test, k = 3) with the
+  # dbarts DEFAULT sampler settings (ndpost = 1000, nskip = 100). The
+  # propensity feeds every downstream model, so the calibration gate against
+  # the published Table 2 is only meaningful if it is estimated the same way:
+  # do not substitute the 500/500 schedule used for the outcome models.
   p_mod <- tryCatch(
     dbarts::bart(x.train = X, y.train = Z, x.test = X_test, k = 3,
-                 n.threads = nthread_global, n.samples = n_mcmc, n.burn = n_burn,
-                 seed = f_seed),
+                 n.threads = nthread_global, seed = f_seed),
     error = function(e) { err_msg <<- conditionMessage(e); NULL })
   if (is.null(p_mod)) {
     row[["converged_flag"]] <- 0L
@@ -300,12 +324,16 @@ run_one <- function(seed_emit, d_stream, f_stream, out_path) {
   X <- cbind(X, p); X_test <- cbind(X_test, p_test)
 
   # ---- MVBCF via fast_bart() ----
-  set_rand(f_stream)
-  f_seed <- sample.int(.Machine$integer.max, 1L)
+  f_seed <- use_model_stream(f_stream, "mvbcf")
   row[["model_seed_mvbcf"]] <- f_seed
   t_mv <- system.time({
     mvbcf_mod <- tryCatch(
-      fast_bart(X, Y, cbind(Z, Z), X2, X_test,
+      # Signature (MVBCF_Code.cpp:659): X_con, y, Z, X_mod, X_con_test,
+      # X_mod_test, alpha, beta, alpha_tau, beta_tau, sigma_mu, sigma_tau,
+      # v_0, sigma_0, n_iter, n_tree, n_tree_tau, min_nodesize.
+      # X_mod_test (the tau-part test matrix) is REQUIRED and is the clean
+      # covariate matrix, exactly as GitHub_DGP1.R passes it.
+      fast_bart(X, Y, cbind(Z, Z), X2, X_test, X2_test,
                 0.95, 2, 0.25, 3,
                 diag((mu_val)^2/n_tree_mu, 2), diag((tau_val)^2/n_tree_tau, 2),
                 v_val, diag(wish_val, 2), n_iter, n_tree_mu, n_tree_tau, min_val),
@@ -314,6 +342,7 @@ run_one <- function(seed_emit, d_stream, f_stream, out_path) {
   row[["fit_seconds_mvbcf"]] <- as.numeric(t_mv[["elapsed"]])
   if (!is.null(mvbcf_mod)) {
     raw1 <- mvbcf_mod$predictions_tau_test[, 1, -c(1:n_burn)]
+    stopifnot(nrow(raw1) == n_test, ncol(raw1) == n_mcmc)
     raw2 <- mvbcf_mod$predictions_tau_test[, 2, -c(1:n_burn)]
     row[c("mvbcf_pehe1","mvbcf_pehe2")] <- list(sqrt(mean((Tau1_test - rowMeans(raw1))^2)),
                                                 sqrt(mean((Tau2_test - rowMeans(raw2))^2)))
@@ -356,8 +385,7 @@ run_one <- function(seed_emit, d_stream, f_stream, out_path) {
 
   # ---- BCF (calibrated stochtree; outcome-specific prior scale) ----
   for (k in 1:2) {
-    set_rand(f_stream)
-    f_seed <- sample.int(.Machine$integer.max, 1L)
+    f_seed <- use_model_stream(f_stream, paste0("bcf", k))
     row[[paste0("model_seed_bcf", k)]] <- f_seed
     t_bc <- system.time({
       bc <- tryCatch(
@@ -374,6 +402,7 @@ run_one <- function(seed_emit, d_stream, f_stream, out_path) {
     tt <- if (ss == 1L) Tau1_test else Tau2_test
     if (!is.null(bc)) {
       raw <- bc$tau_hat_test                 # rows = test obs, cols = MCMC draws
+      stopifnot(nrow(raw) == n_test, ncol(raw) == n_mcmc)
       tau <- rowMeans(raw)                   # per-observation posterior mean
       ate_draw <- colMeans(raw)              # ATE posterior draw vector (average over test)
       row[[paste0("bcf_pehe", ss)]] <- sqrt(mean((tt - tau)^2))
@@ -401,9 +430,21 @@ run_one <- function(seed_emit, d_stream, f_stream, out_path) {
   }
 
   # ---- BART (univariate bartCause, one model per outcome) ----
+  # GitHub_DGP1.R:154-157 names the design columns V1..Vp before bartc(), so
+  # that predict(bart_mod, X_test) can match train and test columns by name.
+  # Without this bartCause matches positionally and warns (or errors) on an
+  # unnamed matrix. Set them at the same point in the sequence as the original.
+  colnames(X) <- paste0("V", seq_len(ncol(X)))
+  colnames(X_test) <- paste0("V", seq_len(ncol(X_test)))
+
+  # bartCause returns `icate` as (posterior draws x test observations) -- the
+  # TRANSPOSE of the stochtree / fast_bart convention. GitHub_DGP1.R:158-166,
+  # 261, 266 therefore uses colMeans() for the per-observation tau, rowMeans()
+  # for the ATE posterior, apply(margin = 2) for coverage/width and colSds()
+  # for the CRPS scale. Keep those margins here; swapping them silently
+  # computes every BART metric on the wrong axis.
   for (k in 1:2) {
-    set_rand(f_stream)
-    f_seed <- sample.int(.Machine$integer.max, 1L)
+    f_seed <- use_model_stream(f_stream, paste0("bart", k))
     row[[paste0("model_seed_bart", k)]] <- f_seed
     t_bt <- system.time({
       bm <- tryCatch(
@@ -414,20 +455,26 @@ run_one <- function(seed_emit, d_stream, f_stream, out_path) {
     row[[paste0("fit_seconds_bart", k)]] <- as.numeric(t_bt[["elapsed"]])
     if (!is.null(bm)) {
       ss <- if (k == 1L) 1L else 2L
-      ic <- predict(bm, X_test, type = "icate")   # rows = test obs, cols = posterior draws
+      ic <- predict(bm, X_test, type = "icate")   # rows = draws, cols = test obs
+      # Fail loudly rather than silently averaging over the wrong axis. Every
+      # BART metric below depends on this orientation, and n_test (1000) and
+      # n_mcmc (500) are both plausible dimensions, so a transposed matrix would
+      # not error -- it would recycle and write meaningless numbers into every
+      # shard. Costs microseconds; protects the whole campaign.
+      stopifnot(ncol(ic) == n_test, nrow(ic) == n_mcmc)
       tt <- if (ss == 1L) Tau1_test else Tau2_test
-      tau <- rowMeans(ic)                         # per-observation posterior mean
-      ate_draw <- colMeans(ic)                    # per-draw ATE (average over test)
+      tau <- colMeans(ic)                         # per-observation posterior mean
+      ate_draw <- rowMeans(ic)                    # per-draw ATE (average over test)
       row[[paste0("bart_pehe", ss)]] <- sqrt(mean((tt - tau)^2))
       row[[paste0("bart_ate", ss)]] <- mean(ate_draw)
       row[[paste0("bart_bias", ss)]] <- mean(ate_draw) - mean(tt)
       row[[paste0("bart_crmse", ss)]] <- mean((tt - tau)^2)
       row[[paste0("bart_atesq", ss)]] <- (mean(ate_draw) - mean(tt))^2
-      row[[paste0("bart_crps", ss)]] <- mean(crps_norm(tt, mean = tau, sd = rowSds(ic)))
+      row[[paste0("bart_crps", ss)]] <- mean(crps_norm(tt, mean = tau, sd = colSds(ic)))
       row[c(paste0("bart_cov50", ss), paste0("bart_cov95", ss))] <-
-        list(mean(diag(apply(ic, 1, in_cred, tt, 0.5))), mean(diag(apply(ic, 1, in_cred, tt, 0.95))))
+        list(mean(diag(apply(ic, 2, in_cred, tt, 0.5))), mean(diag(apply(ic, 2, in_cred, tt, 0.95))))
       row[c(paste0("bart_wid50", ss), paste0("bart_wid95", ss))] <-
-        list(mean(apply(ic, 1, cred_width, 0.5)), mean(apply(ic, 1, cred_width, 0.95)))
+        list(mean(apply(ic, 2, cred_width, 0.5)), mean(apply(ic, 2, cred_width, 0.95)))
       row[c(paste0("bart_ate_l95", ss), paste0("bart_ate_u95", ss))] <-
         list(quantile(ate_draw, 0.025, names = FALSE), quantile(ate_draw, 0.975, names = FALSE))
       row[c(paste0("bart_ate_l50", ss), paste0("bart_ate_u50", ss))] <-
@@ -443,8 +490,7 @@ run_one <- function(seed_emit, d_stream, f_stream, out_path) {
   }
 
   # ---- MVBART (skewBART) ----
-  set_rand(f_stream)
-  f_seed <- sample.int(.Machine$integer.max, 1L)
+  f_seed <- use_model_stream(f_stream, "mvbart")
   row[["model_seed_mvbart"]] <- f_seed
   t_mb <- system.time({
     mb <- tryCatch({
@@ -459,6 +505,7 @@ run_one <- function(seed_emit, d_stream, f_stream, out_path) {
   if (!is.null(mb)) {
     z0 <- mb$y_hat_test[1:n_test, , ]; z1 <- mb$y_hat_test[-c(1:n_test), , ]
     z10 <- z1 - z0
+    stopifnot(dim(z10)[1] == n_test, dim(z10)[2] == 2L, dim(z10)[3] == n_mcmc)
     ic1 <- rowMeans(z10[, 1, ]); ic2 <- rowMeans(z10[, 2, ])
     row[c("mvbart_pehe1","mvbart_pehe2")] <-
       list(sqrt(mean((Tau1_test - ic1)^2)), sqrt(mean((Tau2_test - ic2)^2)))
@@ -469,8 +516,17 @@ run_one <- function(seed_emit, d_stream, f_stream, out_path) {
     row[["mvbart_crmse2"]] <- mean((Tau2_test - ic2)^2)
     row[["mvbart_atesq1"]] <- (mean(ic1) - mean(Tau1_test))^2
     row[["mvbart_atesq2"]] <- (mean(ic2) - mean(Tau2_test))^2
-    row[["mvbart_crps1"]] <- mean(crps_norm(Tau1_test, mean = ic1, sd = colSds(z10[, 1, ])))
-    row[["mvbart_crps2"]] <- mean(crps_norm(Tau2_test, mean = ic2, sd = colSds(z10[, 2, ])))
+    # DEVIATION FROM UPSTREAM (deliberate, documented). GitHub_DGP1.R:262 and
+    # :293 use colSds(z_1_0_preds[,k,]) here, but that slice is
+    # (test obs x draws): colSds returns one value PER DRAW (length n_mcmc),
+    # while crps_norm needs one sd PER TEST OBSERVATION (length n_test). With
+    # n_test = 1000 and n_mcmc = 500 the upstream call silently recycles and
+    # the mvbart CRPS column is meaningless. Every other model in the upstream
+    # script does supply a per-observation sd. CRPS is promoted to the MCS loss
+    # for the uncertainty comparison (plan 1.7b, 2.3), so this one must be
+    # right: use rowSds, matching the mvbcf branch above.
+    row[["mvbart_crps1"]] <- mean(crps_norm(Tau1_test, mean = ic1, sd = rowSds(z10[, 1, ])))
+    row[["mvbart_crps2"]] <- mean(crps_norm(Tau2_test, mean = ic2, sd = rowSds(z10[, 2, ])))
     row[c("mvbart_cov501","mvbart_cov951","mvbart_cov502","mvbart_cov952")] <-
       list(mean(diag(apply(z10[, 1, ], 1, in_cred, Tau1_test, 0.5))),
            mean(diag(apply(z10[, 1, ], 1, in_cred, Tau1_test, 0.95))),
@@ -524,8 +580,15 @@ cat("run_cell dgp=", dgp_arg, " n=", n_arg, " seeds ", s_start, "..", s_end,
 # records the master actually used, so a shard can always rebuild its streams.
 # -----------------------------------------------------------------------------
 stream <- make_streams(cell_master, s_start, s_end)
-seeds_emit <- if (mode == "pilot") s_start + 1000000L + 1L else s_start:s_end
+# NB the offset is applied to the WHOLE index range. `s_start + 1000000L + 1L`
+# collapses the pilot to a length-1 vector, so a 50-seed pilot shard would run
+# exactly one replication and the calibration gate would be sized at J0 = 1.
+seeds_emit <- if (mode == "pilot") (s_start:s_end) + 1000000L + 1L else s_start:s_end
 seeds_emit <- as.integer(seeds_emit)
+stopifnot(length(seeds_emit) == s_end - s_start + 1L,
+          length(seeds_emit) == length(stream$data),
+          length(seeds_emit) == length(stream$fit),
+          !anyDuplicated(seeds_emit))
 
 cat("running seeds", s_start, "..", s_end, "(", length(seeds_emit), " reps)\n", sep = "")
 idx <- seq_along(seeds_emit)

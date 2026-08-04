@@ -151,7 +151,10 @@ def studentized_paired_bootstrap(
         t_obs = (mean - mu0) / se_obs
         p = float(np.mean(T_b <= t_obs))
     else:  # greater
-        lo_q = np.quantile(T_b, 1 - level)
+        # One-sided LOWER bound [mean - q_{1-a}(T) se, inf). The upper quantile
+        # is the right one here: using q_{a}(T) (which is negative) put the
+        # "lower" bound ABOVE the point estimate.
+        lo_q = np.quantile(T_b, level)
         lower = mean - lo_q * se_obs
         upper = np.inf
         t_obs = (mean - mu0) / se_obs

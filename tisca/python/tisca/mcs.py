@@ -184,7 +184,12 @@ def mcs(
     else:
         idx = GetIndices(iT, k, B, seed=seed)
 
-    mTab_p = np.zeros(iM)
+    # Both must start as NaN: the model that survives the elimination path never
+    # gets a p assigned in the loop, and the backfill below turns NaN into 1.0.
+    # Initialising mTab_p to zeros made that backfill a no-op, so the surviving
+    # (best) model carried an MCS p-value of 0 -- harmless only for as long as
+    # inclusion was decided on p_H0 instead of p_mcs.
+    mTab_p = np.full(iM, np.nan)
     mTab_p_H0 = np.full(iM, np.nan)
     mTab_avg = mL.mean(axis=0)
     elim_order = []
@@ -234,8 +239,14 @@ def mcs(
     )
     table_names = vModels[order]
 
-    included = vModels[mTab_p_H0 > alpha]
-    excluded = vModels[mTab_p_H0 <= alpha]
+    # Hansen, Lunde & Nason (2011) define the MCS at level alpha as
+    # M*_{1-alpha} = { i : p_MCS_i > alpha }, where p_MCS is the RUNNING MAXIMUM
+    # of the elimination p-values along the path -- not the per-step p_H0. The
+    # loop above eliminates every model regardless of its p-value, so selecting
+    # on p_H0 keeps models whose elimination was already implied by an earlier
+    # rejection and drops models the MCS should retain.
+    included = vModels[mTab_p > alpha]
+    excluded = vModels[mTab_p <= alpha]
 
     return {
         "avg_loss": mTab_avg,
@@ -269,18 +280,45 @@ def _loss_center(mL, base_series: int = 0) -> np.ndarray:
 
 
 def reality_check_pvalue(
-    Loss, champion: int = 0, *, B: int = 4999, seed: int | None = None, k: int = 0
+    Loss, champion: int = 0, *, B: int = 4999, seed: int | None = None, k: int = 0,
+    direction: str = "champion_beats_some",
 ) -> dict:
-    """White's Reality Check (2000): does one nominated model beat all benchmarks?
+    """White's Reality Check (2000), a max-type test on paired loss differentials.
 
-    Test statistic ``T = max_k mean(L_champ - L_k)`` over ``k != champion``
-    (positive = champion wins). p-value from the bootstrap distribution of the
-    centred max.
+    **Read the null carefully — it is not "the champion beats all benchmarks".**
+    Both directions are max-type tests and neither establishes dominance over
+    every competitor by rejection:
+
+    ``direction='champion_beats_some'`` (default, the orientation this module
+    has always computed): ``d_k = L_k - L_champ``, ``T = max_k mean(d_k)``.
+    ``H0: max_k E[L_k - L_champ] <= 0`` — the champion is (weakly) the worst of
+    the set. Rejection licenses only "the champion beats **at least one**
+    competitor".
+
+    ``direction='nobody_beats_champion'`` (the classical SPA/RC role
+    assignment, champion = benchmark): ``d_k = L_champ - L_k``,
+    ``H0: max_k E[L_champ - L_k] <= 0`` — no competitor beats the champion.
+    Rejection is evidence **against** the champion. Failing to reject is the
+    usual "no competitor was shown to beat it" diagnostic.
+
+    The positive claim "the champion beats every benchmark" is an
+    intersection-union statement, ``min_k E[L_k - L_champ] > 0``. It is
+    established by rejecting **all** K paired contrasts under FWER control
+    (:func:`tisca.multiplicity.romano_wolf_stepdown`), not by either max-test
+    here. ``conjunctive_beats_all`` in the return value reports that verdict at
+    the marginal level as a convenience flag.
     """
+    if direction not in ("champion_beats_some", "nobody_beats_champion"):
+        raise validate.ValidationError(
+            "direction must be 'champion_beats_some' or 'nobody_beats_champion'."
+        )
     mL = validate.validate_loss_array(Loss)
     iT, iM = mL.shape
     others = [c for c in range(iM) if c != champion]
-    rck = _loss_center(mL, champion)[:, others]  # (T, m-1), excludes the zero champ column
+    # _loss_center(mL, champion)[:, k] == L_k - L_champ.
+    rck = _loss_center(mL, champion)[:, others]  # (T, m-1)
+    if direction == "nobody_beats_champion":
+        rck = -rck
     dbar = rck.mean(axis=0)
     T_obs = float(np.max(dbar))
 
@@ -291,22 +329,49 @@ def reality_check_pvalue(
         dbar_b = rck_b.mean(axis=0)
         T_b[b] = float(np.max(dbar_b - dbar))
     p = float(np.mean(T_b > T_obs))
-    return {"p_value": p, "T_obs": T_obs, "B": B, "seed": seed}
+    return {
+        "p_value": p,
+        "T_obs": T_obs,
+        "B": B,
+        "seed": seed,
+        "direction": direction,
+        "null": (
+            "max_k E[L_k - L_champ] <= 0 (champion is weakly worst)"
+            if direction == "champion_beats_some"
+            else "max_k E[L_champ - L_k] <= 0 (no competitor beats the champion)"
+        ),
+        "conjunctive_beats_all": bool(np.all(_loss_center(mL, champion)[:, others].mean(axis=0) > 0)),
+    }
 
 
 def spa_pvalue(
-    Loss, champion: int = 0, *, B: int = 4999, seed: int | None = None, k: int = 0
+    Loss, champion: int = 0, *, B: int = 4999, seed: int | None = None, k: int = 0,
+    direction: str = "champion_beats_some",
 ) -> dict:
-    """Hansen's Super Predictive Ability (2005): studentized vs a benchmark.
+    """Hansen's Superior Predictive Ability (2005): the studentized max-test.
 
-    ``d_j = L_champ,j - L_other,j``; ``T = max_k sqrt(T) dbar_k / sd_k`` (champion
-    beats all). The recentred bootstrap p-value uses the studentize-recentre
-    scheme of Hansen (2005).
+    ``d_k = L_k - L_champ`` (default ``direction``), ``T = max_k sqrt(T)
+    dbar_k / sd_k``. The null and the interpretation of a rejection are exactly
+    as documented in :func:`reality_check_pvalue` — in particular, rejection
+    does **not** establish that the champion beats every benchmark.
+
+    Recentring is **full** (``d - dbar``), which is Hansen's liberal variant
+    ``SPA_l`` (equivalently the studentized Reality Check). Hansen's recommended
+    consistent variant ``SPA_c`` recentres only the series that fail the
+    threshold ``dbar_k >= -sqrt(var_k/T) * sqrt(2 log log T)``; ``SPA_l`` is an
+    upper bound on the ``SPA_c`` p-value, so it is conservative for rejection.
+    Report which variant was used.
     """
+    if direction not in ("champion_beats_some", "nobody_beats_champion"):
+        raise validate.ValidationError(
+            "direction must be 'champion_beats_some' or 'nobody_beats_champion'."
+        )
     mL = validate.validate_loss_array(Loss)
     iT, iM = mL.shape
     others = [c for c in range(iM) if c != champion]
-    rck = _loss_center(mL, champion)[:, others]
+    rck = _loss_center(mL, champion)[:, others]   # column k == L_k - L_champ
+    if direction == "nobody_beats_champion":
+        rck = -rck
     rbar = rck.mean(axis=0)
     sd = rck.std(axis=0, ddof=1)
     with np.errstate(divide="ignore", invalid="ignore"):
@@ -324,7 +389,19 @@ def spa_pvalue(
             t_b = np.where(sd_b > 0, np.sqrt(iT) * rbar_b / sd_b, 0.0)
         T_b[b] = float(np.max(t_b))
     p = float(np.mean(T_b > T_obs))
-    return {"p_value": p, "T_obs": T_obs, "B": B, "seed": seed}
+    return {
+        "p_value": p,
+        "T_obs": T_obs,
+        "B": B,
+        "seed": seed,
+        "direction": direction,
+        "variant": "SPA_l (full recentring; conservative relative to SPA_c)",
+        "null": (
+            "max_k E[L_k - L_champ] <= 0 (champion is weakly worst)"
+            if direction == "champion_beats_some"
+            else "max_k E[L_champ - L_k] <= 0 (no competitor beats the champion)"
+        ),
+    }
 
 
 # Convenience alias.

@@ -6,7 +6,7 @@ This directory preserves the code that accompanied the **original submission** o
 > Approach to Simulation Design in Causal Inference." International Journal of
 > Data Science and Analytics (major revision, 2026).
 
-**It is retained for audit and historical reference only and is entirely supervised.**
+**It is retained for audit and historical reference only, and is entirely superseded.**
 
 Everything in this directory corresponds to **TISCA v1** as submitted. It is
 superseded by the restructured `tisca/`, `experiments/`, `results/`, `figures/`

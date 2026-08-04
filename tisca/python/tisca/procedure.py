@@ -136,7 +136,10 @@ class TwoStageDesign:
         for c in self.contrasts:
             a = pilot[:, self._metric(c, "A")]
             b = pilot[:, self._metric(c, "B")]
-            _, _, dropped = validate.validate_contrast_pair(a, b, name=c.get("name", "contrast"))
+            # Use the LISTWISE-DELETED pair (C1). Calling the validator and then
+            # discarding its return value left any NaN in place, so s_D came
+            # back NaN and the planner silently mis-sized J.
+            a, b, dropped = validate.validate_contrast_pair(a, b, name=c.get("name", "contrast"))
             D = a - b
             sd = float(np.std(D, ddof=1))
             mode = c.get("mode", "M1")
@@ -167,32 +170,40 @@ class TwoStageDesign:
         # Stage 2: confirmatory run (the pilot is NOT reused).
         conf = self._run_rows(self.seed_conf_base, J_final)
 
-        # Final inference: run each pre-specified test once at alpha_adj.
+        # Final inference: run each pre-specified test once at alpha_adj, in the
+        # SAME mode it was planned in (C4 / spec §8.4).
         results = []
         rejected = []
         for c in self.contrasts:
             a = conf[:, self._metric(c, "A")]
             b = conf[:, self._metric(c, "B")]
-            _, _, dropped = validate.validate_contrast_pair(a, b, name=c.get("name", "contrast"))
+            a, b, dropped = validate.validate_contrast_pair(a, b, name=c.get("name", "contrast"))
             D = a - b
             mode = c.get("mode", "M1")
             alpha_c = self.alpha_adj
-            alternative = self._alternative_for(mode)
-            from .inference import paired_t
-
-            t_res = paired_t(D, alternative=alternative)
-            p = t_res["p_value"]
-            # For one-sided "lower is better" modes the rejection region aligns
-            # with the alternative; for M1 it is two-sided at alpha_c.
-            if mode == "M1":
-                reject = p <= alpha_c
-            else:
-                reject = p <= alpha_c
+            t_res, reject = self._final_test(D, mode, c.get("margin"), alpha_c)
             results.append({**t_res, "mode": mode, "n_dropped": dropped})
             rejected.append(bool(reject))
 
-        # Family-level reporting.
-        marginal_power = np.array([1.0 for _ in rejected], dtype=float)
+        # Family-level reporting. Marginal power is the PLANNED power at delta
+        # and the planned J, evaluated in the contrast's own mode -- not the
+        # realised rejections (an earlier version returned a vector of 1.0s,
+        # which read as "100% power" in the output).
+        marginal_power = np.array(
+            [
+                _plan.power_function(
+                    c.get("mode", "M1"),
+                    J_final,
+                    c.get("delta", 0.0),
+                    pr["sigma_ub"],
+                    margin=c.get("margin"),
+                    alpha=self.alpha_adj,
+                )
+                if pr["sigma_ub"] > 0 else 1.0
+                for c, pr in zip(self.contrasts, plan_rows)
+            ],
+            dtype=float,
+        )
         conjunctive = bool(all(rejected)) if self.success_criterion == "conjunctive" else None
         disjunctive = bool(any(rejected)) if self.success_criterion == "disjunctive" else None
 
@@ -215,14 +226,52 @@ class TwoStageDesign:
         }
 
     @staticmethod
-    def _alternative_for(mode):
-        # M2/M3 (lower is better superiority/min-effect) reject in the lower tail;
-        # M4 (non-inferiority) and M5 (TOST) are lower-tail / two-one-sided. In the
-        # loss framing lower is better, so the "better than benchmark" claims are
-        # one-sided lower. M1 stays two-sided.
-        if mode in ("M2", "M3", "M4"):
-            return "less"
-        return "two-sided"
+    def _final_test(D, mode, margin, alpha):
+        """Run the pre-specified final test for one contrast, in its own mode.
+
+        Each mode has its own null VALUE, not just its own sidedness. Testing
+        every mode against ``mu0 = 0`` (as an earlier version did) silently
+        turns M3 into M2, M4 into a superiority test, and M5 into a two-sided
+        equality test -- which is precisely the planning/testing misalignment
+        C4 exists to forbid.
+
+        * M1 two-sided,        ``H0: theta = 0``
+        * M2 lower one-sided,  ``H0: theta >= 0``
+        * M3 lower one-sided,  ``H0: theta >= -Delta``  (centre on ``-Delta``)
+        * M4 lower one-sided,  ``H0: theta >=  Delta``  (centre on ``+Delta``)
+        * M5 TOST,             ``H0: |theta| >= Delta`` (both arms at alpha)
+        """
+        from .inference import paired_t
+
+        mode = (mode or "M1").upper()
+        if mode == "M1":
+            res = paired_t(D, 0.0, alternative="two-sided")
+            return res, res["p_value"] <= alpha
+        if mode == "M2":
+            res = paired_t(D, 0.0, alternative="less")
+            return res, res["p_value"] <= alpha
+        if mode in ("M3", "M4"):
+            if margin is None:
+                raise validate.ValidationError(f"Mode {mode} requires a margin.")
+            mu0 = -float(margin) if mode == "M3" else float(margin)
+            res = paired_t(D, mu0, alternative="less")
+            res["mu0"] = mu0
+            return res, res["p_value"] <= alpha
+        if mode == "M5":
+            if margin is None:
+                raise validate.ValidationError("Mode M5 requires a margin.")
+            m = float(margin)
+            lo = paired_t(D, -m, alternative="greater")   # H0: theta <= -Delta
+            up = paired_t(D, m, alternative="less")       # H0: theta >=  Delta
+            reject = (lo["p_value"] <= alpha) and (up["p_value"] <= alpha)
+            res = dict(up)
+            res.update(
+                p_value=max(lo["p_value"], up["p_value"]),  # TOST p = max of the arms
+                p_lower=lo["p_value"], p_upper=up["p_value"],
+                margin=m, alternative="TOST",
+            )
+            return res, reject
+        raise validate.ValidationError(f"Unknown mode {mode!r} in the final test.")
 
 
 class AdaptiveDesign:
@@ -276,6 +325,7 @@ class AdaptiveDesign:
             for c in self.contrasts:
                 a = accumulated[:, self._metric(c, "A")]
                 b = accumulated[:, self._metric(c, "B")]
+                a, b, _ = validate.validate_contrast_pair(a, b, name=c.get("name", "contrast"))
                 D = a - b
                 sd = float(np.std(D, ddof=1))
                 J, _ = _plan.required_J(
@@ -305,15 +355,12 @@ class AdaptiveDesign:
         for c in self.contrasts:
             a = accumulated[:, self._metric(c, "A")]
             b = accumulated[:, self._metric(c, "B")]
-            _, _, dropped = validate.validate_contrast_pair(a, b, name=c.get("name", "contrast"))
+            a, b, dropped = validate.validate_contrast_pair(a, b, name=c.get("name", "contrast"))
             D = a - b
             mode = c.get("mode", "M1")
-            alternative = AdaptiveDesign._alternative_for(mode)
-            from .inference import paired_t
-
-            t_res = paired_t(D, alternative=alternative)
+            t_res, reject = TwoStageDesign._final_test(D, mode, c.get("margin"), self.alpha_adj)
             results.append({**t_res, "mode": mode, "n_dropped": dropped})
-            rejected.append(bool(t_res["p_value"] <= self.alpha_adj))
+            rejected.append(bool(reject))
 
         return {
             "J_final": current,
@@ -344,12 +391,6 @@ class AdaptiveDesign:
 
     def _metric(self, row, key):
         return row[key]
-
-    @staticmethod
-    def _alternative_for(mode):
-        if mode in ("M2", "M3", "M4"):
-            return "less"
-        return "two-sided"
 
 
 # Functional conveniences --------------------------------------------------- #

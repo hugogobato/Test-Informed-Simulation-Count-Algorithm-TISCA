@@ -19,7 +19,14 @@ reusing the leading rows exactly as the internal-pilot algorithms do.
 Designs (mapping to REVISION_PLAN.md P3-T2 and tisca_v2_spec.md):
   D1  fixed-J two-stage from an independent pilot (RAW pilot sigma_D, unadjusted alpha)
   D2  internal-pilot re-estimation (Algorithm 2; pilot rows reused)
-  D3  TISCA v1: iterative, unpaired Welch (the v1 defect being studied)
+  D3  TISCA v1: unpaired Welch on paired data (the v1 defect being studied).
+      MEASURED, not assumed: with positively correlated methods the v1 test is
+      severely CONSERVATIVE, not liberal. At delta = 0.5, J0 = 50, normal losses
+      its unconditional Type I error falls 0.053 -> 0.022 -> 0.002 -> 0.000 as
+      rho goes 0 -> 0.3 -> 0.6 -> 0.9, while D4 holds ~0.05 throughout. The
+      case study's own paired correlations are r = 0.58-0.80 (plan 1.1), so
+      that is the operative regime: v1 did not inflate the false-positive rate,
+      it threw away power and oversized J.
   D4  TISCA v2: two-stage (Algorithm 1), sigma_D_UB + adjusted alpha
   D5  paired fixed-precision (MCSE / half-width precision target)
   D6  oracle fixed-J (true sigma known), one-shot test
@@ -33,6 +40,8 @@ from __future__ import annotations
 
 import numpy as np
 from scipy import stats
+
+from ..planning import nct_cdf as _nct_cdf
 
 # --------------------------------------------------------------------------- #
 # shared planning math (vectorised)
@@ -49,13 +58,16 @@ def m1_power(J, delta, sigma_D, alpha):
     J = np.asarray(J, dtype=float)
     ncp = np.sqrt(J) * delta / sigma_D
     crit = stats.t.ppf(1.0 - alpha / 2.0, J - 1)
-    return 1.0 - (stats.nct.cdf(crit, J - 1, ncp) - stats.nct.cdf(-crit, J - 1, ncp))
+    # Route through the NaN-safe wrapper: scipy's nct.cdf returns NaN instead of
+    # an underflowed ~0 at large |ncp|, and a NaN power silently fails the
+    # `pw >= target` test, pushing the solver to a larger J than needed.
+    return 1.0 - (_nct_cdf(crit, J - 1, ncp) - _nct_cdf(-crit, J - 1, ncp))
 
 
 def m2_directional_power(J, delta, sigma_D, alpha):
     """M2 one-sided power (lower tail, lower-is-better)."""
     ncp = np.sqrt(J) * delta / sigma_D
-    return stats.nct.cdf(stats.t.ppf(alpha, J - 1), J - 1, ncp)
+    return _nct_cdf(stats.t.ppf(alpha, J - 1), J - 1, ncp)
 
 
 def _power_for_mode(mode, J, delta, sigma_D, alpha):
@@ -69,18 +81,38 @@ def _power_for_mode(mode, J, delta, sigma_D, alpha):
 def solve_J(power_target, delta, sigma_D, alpha, mode=1, Jmin=4, Jmax=10_000):
     """Smallest J with power(J) >= power_target (per repetition if sigma_D is (R,)).
 
-    Returns ``(J, within_cap)``. Because power is monotone in J for the M1/M2
-    modes, evaluating on a dense grid and taking the first index that meets the
-    target is exact for M1 (up to grid resolution); for M2 a refined scan is used.
+    Returns ``(J, within_cap)``. Power is monotone in J for the M1/M2 modes, so
+    this is a vectorised bisection: ~``log2(Jmax)`` noncentral-t evaluations per
+    repetition instead of the ``Jmax`` of a dense grid. At the default
+    ``R = 5000`` and ``Jmax = 1000`` that is 5e4 rather than 5e6 nct calls per
+    cell -- the difference between an E1 module that runs in minutes and one
+    that does not fit its notebook budget. The answer is identical (both return
+    the exact smallest integer J).
     """
     aa = alpha
     sd = np.atleast_1d(np.asarray(sigma_D, dtype=float))
-    grid = np.arange(Jmin, Jmax + 1, dtype=float)
-    pw = _power_for_mode(mode, grid[None, :], delta, sd[:, None], aa)
-    ok = pw >= power_target
-    any_ok = ok.any(axis=1)
-    idx = np.where(any_ok, ok.argmax(axis=1), -1)
-    J = np.where(any_ok, grid[idx].astype(int), int(Jmax))
+    Jmin, Jmax = int(Jmin), int(Jmax)
+
+    def pw(j):
+        return np.asarray(_power_for_mode(mode, np.asarray(j, dtype=float), delta, sd, aa))
+
+    lo = np.full(sd.shape, Jmin, dtype=int)
+    at_min = pw(lo) >= power_target
+    hi = np.full(sd.shape, Jmax, dtype=int)
+    any_ok = pw(hi) >= power_target
+    # Bisect on the monotone predicate; rows already satisfied at Jmin collapse
+    # to Jmin, rows never satisfied are reported at Jmax with within_cap False.
+    active = any_ok & ~at_min
+    lo_a = np.where(active, Jmin, Jmin)
+    hi_a = np.where(active, Jmax, Jmin)
+    while np.any(hi_a - lo_a > 1):
+        mid = (lo_a + hi_a) // 2
+        ok_mid = pw(mid) >= power_target
+        hi_a = np.where(active & ok_mid, mid, hi_a)
+        lo_a = np.where(active & ~ok_mid, mid, lo_a)
+        if not np.any(active & (hi_a - lo_a > 1)):
+            break
+    J = np.where(at_min, Jmin, np.where(any_ok, hi_a, Jmax))
     return J.astype(int), any_ok
 
 
@@ -214,7 +246,10 @@ def design_internal_pilot(config, draws, alpha, mode=1, **k):
     for _ in range(nmax):
         _, _, s_D = paired_t_stats(D, J)
         sD = np.where(np.isclose(s_D, 0) | np.isnan(s_D), 1e-12, s_D)
-        sigma_eff = _inflate(sD, int(J[0]), config.get("gamma", 0.20))
+        # Per-repetition df. After the first look J varies ACROSS repetitions, so
+        # `int(J[0])` applied one repetition's df to all of them and mis-inflated
+        # every other row.
+        sigma_eff = _inflate(sD, J, config.get("gamma", 0.20))
         need, _ = solve_J(config["power_target"], config["delta"], sigma_eff,
                           aa, mode=mode, Jmax=Jmax)
         J_next = np.clip(np.maximum(need, J), J, Jmax)
@@ -229,12 +264,24 @@ def design_internal_pilot(config, draws, alpha, mode=1, **k):
 
 
 def design_v1_welch(config, draws, alpha, **k):
-    """D3: TISCA v1's iterative *unpaired* Welch, stopping at 80% power.
+    """D3: TISCA v1's *unpaired* Welch design -- plan AND test as v1 did.
 
-    Reproduces the v1 defect (independent Welch on paired data): the design stops
-    at the size the (mis-specified) unpaired power target requires, then runs an
-    independent-samples Welch test. Its unconditional Type I error is inflated,
-    which P3-T2/P3-T3 report as the finding in favour of the two-stage default.
+    Two things have to be faithful for the D3-vs-D4 comparison to mean anything,
+    because it is the measurement behind the paper's "fixing IJDA #2 buys ~2.3x"
+    claim:
+
+    1. **The planning variance is the unpaired one.** v1 sized the study from the
+       two-independent-sample formula, whose relevant scale is
+       ``sqrt(s_A^2 + s_B^2)`` -- NOT ``sigma_D = sqrt(s_A^2 + s_B^2 - 2 rho
+       s_A s_B)``. Planning D3 from ``config["sigma_D"]`` (as this function used
+       to) hands v1 the paired variance it never had: at ``rho = 0.6`` the two
+       differ by a factor of ~1.6 in sigma and ~2.5 in J, so D3 and D4 would come
+       out nearly identical and the headline effect would vanish. The marginal
+       sds are estimated from the leading ``J0`` rows, matching v1's plug-in
+       character.
+    2. **The test carries Welch-Satterthwaite df**, not ``J - 1``. Using ``J - 1``
+       makes the v1 test look more conservative than it is, which understates
+       exactly the defect being reported.
     """
     J0 = config.get("J0", 50)
     Jmax = config.get("Jmax", 100_000)
@@ -242,11 +289,17 @@ def design_v1_welch(config, draws, alpha, **k):
     R = pool.shape[0]
     LA = pool[:, :, 0]
     LB = pool[:, :, 1]
-    plan_sig = config.get("sigma_D", 1.0)
-    need, _ = solve_J(config["power_target"], config["delta"], plan_sig,
-                      alpha, mode=1, Jmax=Jmax)
-    need = np.broadcast_to(np.atleast_1d(np.asarray(need, dtype=int)), (R,))
+
+    # v1 plug-in planning scale from the leading J0 rows (the accumulating pilot).
+    sA0 = LA[:, :J0].std(axis=1, ddof=1)
+    sB0 = LB[:, :J0].std(axis=1, ddof=1)
+    plan_sig = np.sqrt(sA0 ** 2 + sB0 ** 2)
+    plan_sig = np.where(np.isclose(plan_sig, 0), 1e-12, plan_sig)
+
+    need, ok = solve_J(config["power_target"], config["delta"], plan_sig,
+                       alpha, mode=1, Jmax=Jmax)
     J = np.clip(np.maximum(need, J0), J0, Jmax).astype(int)
+
     sel = np.arange(LA.shape[1])[None, :] < J[:, None]
     la_sel = np.where(sel, LA, 0.0)
     lb_sel = np.where(sel, LB, 0.0)
@@ -255,11 +308,16 @@ def design_v1_welch(config, draws, alpha, **k):
     s2A = np.where(sel, (LA - meanA[:, None]) ** 2, 0.0).sum(1) / (J - 1)
     s2B = np.where(sel, (LB - meanB[:, None]) ** 2, 0.0).sum(1) / (J - 1)
     with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
-        T = (meanA - meanB) / np.sqrt(s2A / J + s2B / J)
-    p = 2.0 * stats.t.sf(np.abs(T), J - 1)
+        vA, vB = s2A / J, s2B / J
+        T = (meanA - meanB) / np.sqrt(vA + vB)
+        # Welch-Satterthwaite, both groups of size J.
+        df_w = (vA + vB) ** 2 / (vA ** 2 / (J - 1) + vB ** 2 / (J - 1))
+    df_w = np.where(np.isfinite(df_w) & (df_w > 0), df_w, J - 1)
+    p = 2.0 * stats.t.sf(np.abs(T), df_w)
+    capped = np.where((J >= Jmax) & ~ok, 1.0, 0.0)
     return _emit(T, p, J.astype(float), meanA - meanB,
-                 np.sqrt((s2A + s2B) / 2), np.zeros_like(J)), dict(pilot_reused=True,
-                                                                    J_planned=J)
+                 np.sqrt((s2A + s2B) / 2), capped), dict(
+        pilot_reused=True, J_planned=J, plan_sigma_unpaired=plan_sig, df_welch=df_w)
 
 
 def design_precision(config, draws, alpha, **k):

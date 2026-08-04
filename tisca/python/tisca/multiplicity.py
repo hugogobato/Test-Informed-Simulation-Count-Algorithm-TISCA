@@ -117,7 +117,6 @@ def romano_wolf_stepdown(
         rng = np.random.default_rng(seed)
         idx = rng.integers(0, J, size=(J, B))
 
-    D_boot = D[idx]  # (J, B, K) heavy if materialised; compute per-b on the fly
     t_b = np.empty((B, K))
     for b in range(B):
         Db = D[idx[:, b], :]
@@ -129,8 +128,14 @@ def romano_wolf_stepdown(
             tb = np.where(sb == 0, 0.0, tb)
         t_b[b, :] = tb
 
-    # Stepdown: iterate hypotheses from most to least significant in |t| terms.
-    abs_t = t_obs
+    # Stepdown: iterate hypotheses from most to least significant.
+    # The bootstrap max-statistic is built from |t_b|, so the observed statistic
+    # it is compared against must also be |t_obs|. Comparing |t_b| against the
+    # SIGNED t_obs makes every negative contrast unrejectable: for a
+    # lower-is-better loss "A beats B" means D_j < 0 and t_obs < 0, and
+    # Pr(max|t_b| >= negative) == 1, so the whole case-study family would come
+    # back with adjusted p = 1.
+    abs_t = np.abs(t_obs)
     order = np.argsort(-abs_t)
     p_adj = np.zeros(K)
     running = 0.0
