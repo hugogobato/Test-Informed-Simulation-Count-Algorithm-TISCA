@@ -31,3 +31,4 @@ tisca/tests/parity_resampling_spec.json
 # Large generated artifacts are committed deliberately under results/ and
 # figures/ (the paper promises them); do not blanket-ignore *.csv here so we
 # do not accidentally hide promised public data.
+env/tisca_rlib.tar.gz

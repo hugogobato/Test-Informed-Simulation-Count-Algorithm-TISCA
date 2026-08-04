@@ -13,14 +13,14 @@ model described in `REVISION_PLAN.md` §5.
 | `E1_modB_shard1.ipynb` | **P3-T2 Module B** | first 300 cells of the 600-cell multiplicity grid, with `R=2000`, `B=999`, and per-cell Drive checkpointing. |
 | `E1_modB_shard2.ipynb` | **P3-T2 Module B** | second 300 cells of the 600-cell multiplicity grid, with `R=2000`, `B=999`, and per-cell Drive checkpointing. |
 | `E1_moduleA.ipynb` | **legacy P3-T2 runner** | earlier standalone Module-A runner retained for provenance; use `E1_modA_C_D.ipynb` for the complete planned A/C/D sweep. |
-| `E3_mvbcf_shard.ipynb` | **P3-T5(d)** | the parameterised E3 worker: edit Cell 2 (`SHARD_ID, DGP, N, SEED_START, SEED_END, MC_CORES, MODE`), restore the P0-T4 bundle, compile the upstream `MVBCF_Code.cpp`, run `Rscript run_cell.R`, checkpoint each replication to a Drive CSV, verify seed completeness, and mirror a copy via `files.download`. One notebook = one 2-vCPU session. |
+| `E3_mvbcf_shard.ipynb` | **P3-T5(d)** | historical E3 worker entry point, regenerated from the first confirmatory shard; the ready-made per-shard notebooks are in `E3_shards/`. It restores the P0-T4 bundle, compiles the upstream `MVBCF_Code.cpp`, checkpoints each replication to Drive, and verifies seed completeness. |
 | `E3_round0_pilot_calibration.ipynb` | **P3-T5(e)** | Round 0 pilot (50 independent-seed reps of DGP1/n=500) plus the **P3-T5(e) gate**: compare the calibrated `stochtree::bcf` means to McJames et al. DGP1 Table 2. No confirmatory shard runs until this passes. |
 | `E4_bibliometric_analysis.ipynb` | **P3-T1(b)** | recount the bibliometric section **from code** (no percentage literals), correct denominators (99/88), regenerate Fig 1/2/3a/3b with larger fonts, and add the publisher/OA stratification. Runs on laptop or a free Colab runtime; emits `Fig_bib_*.png`. |
 
 `P0T4_build_rlib_bundle.ipynb` is the main notebook to run once during Phase 0.
-Once it has produced and published the tarball, paste the direct-download URL
-into Cell 9; every later worker notebook will restore the bundle with a short
-`wget <URL> && tar xzf && .libPaths(<dest>/tisca_rlib/rlib)`.
+The E3 shard set is generated with the public Drive folder containing the
+tarball and `tisca_rlib.sha256`; each E3 notebook downloads that folder and
+verifies the embedded digest before restoring `.libPaths(<dest>/tisca_rlib/rlib)`.
 
 `P1_math_verification.ipynb` is the Phase-1 notebook you run yourself (single
 run, on the laptop or a free Colab CPU runtime, no R bundle). Every cell prints

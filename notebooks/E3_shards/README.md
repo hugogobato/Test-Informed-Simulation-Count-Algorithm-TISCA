@@ -9,24 +9,24 @@ per cell. The 33 Round 1 notebooks fit the 11 accounts times 3 concurrent
 sessions arrangement. Round 0 uses four of those sessions and is run before
 Round 1.
 
-Before uploading, build the P0-T4 R bundle and regenerate the notebooks with its
-direct download URL and SHA256. The checked-in staging set uses the
-`UNBUILT_BUNDLE_URL` and `UNBUILT_BUNDLE_SHA256` sentinels because the bundle is
-not yet available. It is intentionally unusable until regenerated with real
-values:
+Before uploading, build the P0-T4 R bundle and regenerate the notebooks with the
+shared Drive folder and the SHA256 recorded in `env/tisca_rlib.sha256`:
 
 ```bash
 python notebooks/_generators/build_e3_notebooks.py \
-  --bundle-url '<direct bundle URL>' \
-  --bundle-sha256 '<64-character SHA256>'
+  --bundle-folder-url 'https://drive.google.com/drive/folders/1w3quuskj25CBOFCGG0mTRGUHcufPpdb3?usp=sharing' \
+  --bundle-sha256 '12d223bc0fcef624c1ff4cc35c5d7ecc1b1f9b05aa84ecd9d9e4a5a3382bae3c'
 ```
 
-No cell needs editing after that generation step. Each notebook downloads the
-upstream `MVBCF_Code.cpp` at run time, sets `TISCA_MVBCF_CPP` to that downloaded
-copy, restores the R bundle, uses `mc.cores = 2`, and runs model fits with one
-thread. The driver appends every completed replication, including its
-`replication_seconds`, to a CSV on Drive and the final cell includes the
-`google.colab.files.download` fallback.
+The generated notebooks download the folder with `gdown`, locate both
+`tisca_rlib.tar.gz` and `tisca_rlib.sha256`, verify the downloaded checksum
+against the embedded digest and the tarball bytes, and then restore the R
+library. No cell needs editing after that generation step. Each notebook
+downloads the upstream `MVBCF_Code.cpp` at run time, sets `TISCA_MVBCF_CPP` to
+that downloaded copy, restores the R bundle, uses `mc.cores = 2`, and runs
+model fits with one thread. The driver appends every completed replication,
+including its `replication_seconds`, to a CSV on Drive and the final cell
+includes the `google.colab.files.download` fallback.
 
 ## Run order
 

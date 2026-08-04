@@ -7,10 +7,12 @@ no operator configuration cell.  The shard manifest is written to
 ``experiments/E3_mvbcf_casestudy/shard_table.csv`` and is the source of truth
 for collection and completeness checks.
 
-The R library bundle URL and SHA256 are generation-time arguments.  Before the
-bundle exists, ``--allow-unbuilt-bundle`` may be used to stage notebooks with a
-deliberately invalid sentinel.  Those notebooks fail loudly in their restore
-cell until a real bundle is baked in by regenerating the set.
+The R library bundle source and SHA256 are generation-time arguments.  The
+source may be a direct tarball URL or a public Google Drive folder containing
+``tisca_rlib.tar.gz`` and ``tisca_rlib.sha256``.  Before the bundle exists,
+``--allow-unbuilt-bundle`` may be used to stage notebooks with a deliberately
+invalid sentinel.  Those notebooks fail loudly in their restore cell until a
+real bundle is baked in by regenerating the set.
 """
 
 from __future__ import annotations
@@ -27,6 +29,10 @@ from pathlib import Path
 
 UNBUILT_URL = "UNBUILT_BUNDLE_URL"
 UNBUILT_SHA = "UNBUILT_BUNDLE_SHA256"
+DEFAULT_BUNDLE_FOLDER_URL = (
+    "https://drive.google.com/drive/folders/"
+    "1w3quuskj25CBOFCGG0mTRGUHcufPpdb3?usp=sharing"
+)
 SPEEDUP = 1.62
 N500_MINUTES = 6.0
 N100_MINUTES = 2.0
@@ -148,6 +154,9 @@ def build_shards():
 def _bundle_args(parser):
     parser.add_argument("--bundle-url", default=UNBUILT_URL,
                         help="Direct URL for tisca_rlib.tar.gz.")
+    parser.add_argument("--bundle-folder-url", default=None,
+                        help=("Public Google Drive folder containing the tarball and sha256 "
+                              f"file, e.g. {DEFAULT_BUNDLE_FOLDER_URL}"))
     parser.add_argument("--bundle-sha256", default=UNBUILT_SHA,
                         help="SHA256 of the R library bundle.")
     parser.add_argument("--allow-unbuilt-bundle", action="store_true",
@@ -155,24 +164,33 @@ def _bundle_args(parser):
 
 
 def _validated_bundle(args):
+    if args.bundle_folder_url:
+        if args.bundle_url != UNBUILT_URL:
+            raise SystemExit("Use either --bundle-url or --bundle-folder-url, not both")
+        if not re.fullmatch(r"https://drive\.google\.com/drive/folders/.+", args.bundle_folder_url):
+            raise SystemExit("--bundle-folder-url must be a Google Drive folder URL")
+        if not re.fullmatch(r"[0-9a-fA-F]{64}", args.bundle_sha256):
+            raise SystemExit("--bundle-sha256 must be a 64-character hexadecimal digest")
+        return {"kind": "gdrive_folder", "value": args.bundle_folder_url}, args.bundle_sha256.lower()
     unbuilt = args.bundle_url == UNBUILT_URL or args.bundle_sha256 == UNBUILT_SHA
     if unbuilt and not args.allow_unbuilt_bundle:
         raise SystemExit(
-            "The R bundle is not built. Supply --bundle-url and --bundle-sha256, "
-            "or explicitly pass --allow-unbuilt-bundle to stage failing notebooks."
+            "The R bundle is not built. Supply --bundle-url or --bundle-folder-url "
+            "plus --bundle-sha256, or explicitly pass --allow-unbuilt-bundle to "
+            "stage failing notebooks."
         )
     if unbuilt:
         print("WARNING: staging with an unbuilt-bundle sentinel; every notebook "
               "will stop in its bundle assertion cell.")
-        return UNBUILT_URL, UNBUILT_SHA
+        return {"kind": "sentinel", "value": UNBUILT_URL}, UNBUILT_SHA
     if not re.fullmatch(r"https?://.+", args.bundle_url):
         raise SystemExit("--bundle-url must be an http(s) URL")
     if not re.fullmatch(r"[0-9a-fA-F]{64}", args.bundle_sha256):
         raise SystemExit("--bundle-sha256 must be a 64-character hexadecimal digest")
-    return args.bundle_url, args.bundle_sha256.lower()
+    return {"kind": "direct", "value": args.bundle_url}, args.bundle_sha256.lower()
 
 
-def _shared_cells(bundle_url, bundle_sha, row, repo_root):
+def _shared_cells(bundle_source, bundle_sha, row, repo_root):
     cells = []
     md(cells, f"""\
     # E3 {row['round']} shard
@@ -215,29 +233,76 @@ def _shared_cells(bundle_url, bundle_sha, row, repo_root):
         drive.mount("/content/drive")
         print("Drive mounted")
         """))
-    code(cells, textwrap.dedent(f"""\
-        import hashlib, os, re, shutil, subprocess, urllib.request
+    if bundle_source["kind"] == "gdrive_folder":
+        bundle_restore = textwrap.dedent(f"""\
+            import hashlib, os, re, shutil, subprocess, sys
+            from pathlib import Path
 
-        BUNDLE_URL = {bundle_url!r}
-        BUNDLE_SHA256 = {bundle_sha!r}
-        assert BUNDLE_URL not in ("", "{UNBUILT_URL}"), \\
-            "Bundle URL is not built; regenerate with a real URL."
-        assert re.fullmatch(r"[0-9a-fA-F]{{64}}", BUNDLE_SHA256), \\
-            "Bundle SHA256 is missing or malformed; regenerate the notebook."
+            BUNDLE_FOLDER_URL = {bundle_source['value']!r}
+            BUNDLE_SHA256 = {bundle_sha!r}
+            assert re.fullmatch(r"[0-9a-fA-F]{{64}}", BUNDLE_SHA256), \\
+                "Bundle SHA256 is missing or malformed; regenerate the notebook."
 
-        DEST = "/content"
-        LIBDIR = "/content/tisca_rlib/rlib"
-        download_path = "/content/_dl_tisca_rlib.tar.gz"
-        urllib.request.urlretrieve(BUNDLE_URL, download_path)
-        with open(download_path, "rb") as f:
-            observed_sha = hashlib.sha256(f.read()).hexdigest()
-        assert observed_sha == BUNDLE_SHA256.lower(), "R library bundle SHA mismatch"
-        if os.path.isdir("/content/tisca_rlib"):
-            shutil.rmtree("/content/tisca_rlib")
-        subprocess.run(["tar", "xzf", download_path, "-C", DEST], check=True)
-        assert os.path.isdir(LIBDIR), "bundle did not restore the expected rlib directory"
-        print("bundle restored:", LIBDIR)
-        """))
+            BUNDLE_DOWNLOAD_DIR = Path("/content/tisca_bundle_download")
+            if BUNDLE_DOWNLOAD_DIR.exists():
+                shutil.rmtree(BUNDLE_DOWNLOAD_DIR)
+            subprocess.run(
+                [sys.executable, "-m", "pip", "install", "-q", "gdown"],
+                check=True,
+            )
+            download = subprocess.run(
+                [sys.executable, "-m", "gdown", "--folder", BUNDLE_FOLDER_URL,
+                 "--output", str(BUNDLE_DOWNLOAD_DIR), "--remaining-ok"],
+                capture_output=True, text=True,
+            )
+            print(download.stdout[-4000:])
+            if download.returncode != 0:
+                print(download.stderr[-4000:])
+                raise RuntimeError("Google Drive bundle download failed")
+            tar_candidates = sorted(BUNDLE_DOWNLOAD_DIR.rglob("tisca_rlib.tar.gz"))
+            sha_candidates = sorted(BUNDLE_DOWNLOAD_DIR.rglob("tisca_rlib.sha256"))
+            assert len(tar_candidates) == 1, f"expected one tarball, found {{tar_candidates}}"
+            assert len(sha_candidates) == 1, f"expected one checksum file, found {{sha_candidates}}"
+            published_sha = sha_candidates[0].read_text().split()[0].lower()
+            assert published_sha == BUNDLE_SHA256.lower(), \\
+                "published tisca_rlib.sha256 differs from the generated notebook"
+            download_path = "/content/_dl_tisca_rlib.tar.gz"
+            shutil.copy2(tar_candidates[0], download_path)
+            with open(download_path, "rb") as f:
+                observed_sha = hashlib.sha256(f.read()).hexdigest()
+            assert observed_sha == BUNDLE_SHA256.lower(), "R library bundle SHA mismatch"
+            if os.path.isdir("/content/tisca_rlib"):
+                shutil.rmtree("/content/tisca_rlib")
+            subprocess.run(["tar", "xzf", download_path, "-C", "/content"], check=True)
+            LIBDIR = "/content/tisca_rlib/rlib"
+            assert os.path.isdir(LIBDIR), "bundle did not restore the expected rlib directory"
+            print("bundle restored:", LIBDIR, "from", BUNDLE_FOLDER_URL)
+        """)
+    else:
+        bundle_restore = textwrap.dedent(f"""\
+            import hashlib, os, re, shutil, subprocess, urllib.request
+
+            BUNDLE_URL = {bundle_source['value']!r}
+            BUNDLE_SHA256 = {bundle_sha!r}
+            assert BUNDLE_URL not in ("", "{UNBUILT_URL}"), \\
+                "Bundle URL is not built; regenerate with a real URL."
+            assert re.fullmatch(r"[0-9a-fA-F]{{64}}", BUNDLE_SHA256), \\
+                "Bundle SHA256 is missing or malformed; regenerate the notebook."
+
+            DEST = "/content"
+            LIBDIR = "/content/tisca_rlib/rlib"
+            download_path = "/content/_dl_tisca_rlib.tar.gz"
+            urllib.request.urlretrieve(BUNDLE_URL, download_path)
+            with open(download_path, "rb") as f:
+                observed_sha = hashlib.sha256(f.read()).hexdigest()
+            assert observed_sha == BUNDLE_SHA256.lower(), "R library bundle SHA mismatch"
+            if os.path.isdir("/content/tisca_rlib"):
+                shutil.rmtree("/content/tisca_rlib")
+            subprocess.run(["tar", "xzf", download_path, "-C", DEST], check=True)
+            assert os.path.isdir(LIBDIR), "bundle did not restore the expected rlib directory"
+            print("bundle restored:", LIBDIR)
+        """)
+    code(cells, bundle_restore)
     code(cells, textwrap.dedent("""\
         import os, urllib.request
 
@@ -436,7 +501,7 @@ def _sanity(nb, name):
             f"{name} cell {index} contains an unsafe triple quote"
 
 
-def write_outputs(repo_root, rows, bundle_url, bundle_sha):
+def write_outputs(repo_root, rows, bundle_source, bundle_sha):
     notebook_dir = repo_root / "notebooks" / "E3_shards"
     notebook_dir.mkdir(parents=True, exist_ok=True)
     for old in notebook_dir.glob("E3_*.ipynb"):
@@ -444,7 +509,7 @@ def write_outputs(repo_root, rows, bundle_url, bundle_sha):
 
     row_by_name = {}
     for row in rows:
-        cells = _shared_cells(bundle_url, bundle_sha, row, repo_root)
+        cells = _shared_cells(bundle_source, bundle_sha, row, repo_root)
         cells.extend(_run_cells(row))
         if row["mode"] == "pilot" and row["dgp"] == 1 and row["n"] == 500:
             cells.extend(_calibration_cells(row))
