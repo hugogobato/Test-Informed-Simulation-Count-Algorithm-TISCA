@@ -1,0 +1,11 @@
+# TISCA v2 Python runtime dependencies
+# The outer-MC harness (E1) is pure NumPy and runs on Colab without the R bundle.
+numpy>=1.24,<2
+pandas>=2.0
+scipy>=1.10
+matplotlib>=3.7
+seaborn>=0.12
+tqdm>=4.65
+statsmodels>=0.14
+pyarrow>=14.0        # chunked/resumable CSV/Parquet shards for E1
+pytest>=7.0          # unit + R/Python parity tests

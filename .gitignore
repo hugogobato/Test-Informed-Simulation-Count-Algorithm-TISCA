@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.ipynb_checkpoints/
+
+# R
+.Rhistory
+.RData
+.Ruserdata
+*.o
+*.so
+
+# Colab / local scratch (never commit)
+/content/
+.DS_Store
+
+# Large generated artifacts are committed deliberately under results/ and
+# figures/ (the paper promises them); do not blanket-ignore *.csv here so we
+# do not accidentally hide promised public data.
