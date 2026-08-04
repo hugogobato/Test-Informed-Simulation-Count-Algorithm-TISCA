@@ -1,10 +1,40 @@
-"""TISCA v2 — Test-Informed Simulation Count Algorithm (Python reference implementation).
+"""TISCA v2 - Test-Informed Simulation Count Algorithm (Python reference).
 
-Modules land in Phase 2 (P2-T1):
-  estimands, planning, inference, multiplicity, mcs, procedure, validate.
+The Python reference implementation is split across the Phase 2 software tasks:
 
-Currently this package is a structural stub so the layout is importable and
-testable while Phase 1 (spec) is in progress.
+* P2-T1 (this deliverable): ``estimands``, ``planning``, ``inference``,
+  ``multiplicity``, ``mcs``, ``procedure``, ``validate``.
+* P2-T3 (parallel): ``outermc`` - the outer-MC operating-characteristics engine,
+  developed concurrently.
+
+A partial working tree (any phase landing before the others) must never break
+``import tisca``, so available submodules are discovered gracefully rather than
+imported eagerly. ``from tisca import planning`` (etc.) remains valid for every
+module that exists, whether or not it is listed here.
 """
 
-__version__ = "2.0.0-dev"
+from __future__ import annotations
+
+_SUBMODULES = (
+    "estimands",
+    "planning",
+    "inference",
+    "multiplicity",
+    "mcs",
+    "procedure",
+    "validate",
+    "outermc",
+)
+
+__all__ = []
+_imported = []
+for _name in _SUBMODULES:
+    try:
+        __import__(f"{__name__}.{_name}")
+        _imported.append(_name)
+    except ImportError:
+        # The submodule (or one of its transitive dependencies, e.g. the R port
+        # or the outer-MC harness) is not available in this checkout; skip it.
+        pass
+
+__version__ = "2.0.0"
