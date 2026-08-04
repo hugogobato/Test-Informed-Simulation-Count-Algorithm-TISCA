@@ -22,8 +22,8 @@
 #      sourceCpp (as the original), not mvbcf::run_mvbcf() (§1.7c, P3-T5[a].5).
 #   5. The full original metric set is kept and four superset columns added:
 #      cate_mse, ate_sq_err, fit_seconds, converged_flag/error_message (§4.5).
-#   6. Stochtree/dbarts fits run single-threaded (nthread = 1) so mc.cores is
-#      the only source of parallelism (reproducibility, §3.5).
+#   6. Stochtree/dbarts fits run single-threaded (num_threads/nthread = 1), so
+#      mc.cores is the only source of parallelism (reproducibility, §3.5).
 #
 # CLI:
 #   Rscript run_cell.R <dgp> <n> <seed_start> <seed_end> --out <csv> \
@@ -220,19 +220,33 @@ mu_val <- 1; tau_val <- 0.375; v_val <- 1; wish_val <- 1; min_val <- 1
 nthread_global <- 1L
 
 # -----------------------------------------------------------------------------
-# Append a data.frame to a CSV under a file lock (only the parent collects
-# results, so concurrency is not between workers but is kept safe anyway).
+# Append a data.frame to a CSV under an atomic directory lock. The workers call
+# this function directly, so a check-then-create lock file is not sufficient:
+# two workers can both observe that the file is absent and corrupt the CSV.
 # -----------------------------------------------------------------------------
 append_csv <- function(df, path) {
+  has_contents <- file.exists(path) && file.info(path)$size > 0L
+  if (has_contents) {
+    header <- names(read.csv(path, nrows = 0L, check.names = FALSE))
+    if (!identical(header, names(df))) {
+      stop("checkpoint CSV schema differs from the current run_cell.R schema")
+    }
+  }
   write.table(df, path, row.names = FALSE, sep = ",",
-              col.names = !file.exists(path), append = file.exists(path))
+              col.names = !has_contents, append = has_contents)
 }
 append_csv_locked <- function(df, path) {
   lk <- paste0(path, ".lock")
-  wait <- 0
-  while (file.exists(lk) && wait < 300) { Sys.sleep(0.2); wait <- wait + 1 }
-  if (!file.exists(lk)) file.create(lk)
-  on.exit(unlink(lk), add = TRUE)
+  started <- proc.time()[["elapsed"]]
+  repeat {
+    acquired <- dir.create(lk, showWarnings = FALSE)
+    if (acquired) break
+    if (proc.time()[["elapsed"]] - started > 300) {
+      stop("timed out acquiring checkpoint CSV lock: ", lk)
+    }
+    Sys.sleep(0.05)
+  }
+  on.exit(unlink(lk, recursive = TRUE), add = TRUE)
   append_csv(df, path)
 }
 
@@ -287,6 +301,9 @@ run_one <- function(seed_emit, d_stream, f_stream, out_path) {
   row[["seed_cell_master"]] <- cell_master
   row[["seq_phase"]] <- mode
   row[["converged_flag"]] <- 1L
+  row[["hostname"]] <- Sys.info()[["nodename"]]
+  row[["git_sha"]] <- git_sha
+  row[["session_hash"]] <- session_hash
   err_msg <- NA_character_
 
   # ---- data generation on its own stream ----
@@ -312,7 +329,7 @@ run_one <- function(seed_emit, d_stream, f_stream, out_path) {
   # do not substitute the 500/500 schedule used for the outcome models.
   p_mod <- tryCatch(
     dbarts::bart(x.train = X, y.train = Z, x.test = X_test, k = 3,
-                 n.threads = nthread_global, seed = f_seed),
+                 nthread = nthread_global, seed = f_seed),
     error = function(e) { err_msg <<- conditionMessage(e); NULL })
   if (is.null(p_mod)) {
     row[["converged_flag"]] <- 0L
@@ -397,7 +414,8 @@ run_one <- function(seed_emit, d_stream, f_stream, out_path) {
                        treatment_effect_forest_params = list(num_trees = n_tree_tau, sigma2_leaf_init = (0.375*sd(Y[, k]))^2),
                        Z_test = Z_test, propensity_train = p, propensity_test = p_test,
                        num_burnin = n_burn, num_mcmc = n_mcmc, num_gfr = 50,
-                       nthread = nthread_global, random_seed = f_seed),
+                       general_params = list(num_threads = nthread_global,
+                                             random_seed = f_seed)),
         error = function(e) { err_msg <<- conditionMessage(e); NULL })
     })
     row[[paste0("fit_seconds_bcf", k)]] <- as.numeric(t_bc[["elapsed"]])
@@ -558,10 +576,24 @@ run_one <- function(seed_emit, d_stream, f_stream, out_path) {
     row[["error_message"]] <- paste0("mvbart: ", ifelse(is.na(err_msg), "failed", err_msg))
   }
 
-  row[["hostname"]] <- Sys.info()[["nodename"]]
-  row[["git_sha"]] <- git_sha
-  row[["session_hash"]] <- session_hash
   row[["replication_seconds"]] <- as.numeric(proc.time()[["elapsed"]] - replication_start)
+  if (identical(row[["converged_flag"]], 1L)) {
+    character_columns <- c("rng_kind", "seed_data_hash", "seed_fit_hash",
+                           "error_message", "hostname", "git_sha",
+                           "session_hash", "seq_phase")
+    numeric_columns <- setdiff(COL_NAMES, character_columns)
+    nonfinite <- numeric_columns[!vapply(
+      row[numeric_columns],
+      function(value) length(value) == 1L && is.numeric(value) && is.finite(value),
+      logical(1)
+    )]
+    if (length(nonfinite) > 0L) {
+      row[["converged_flag"]] <- 0L
+      row[["error_message"]] <- paste0(
+        "non-finite outputs: ", paste(nonfinite, collapse = ", ")
+      )
+    }
+  }
   df <- as.data.frame(row, stringsAsFactors = FALSE)[COL_NAMES]
   append_csv_locked(df, out_path)
   invisible(NULL)
@@ -599,5 +631,10 @@ idx <- seq_along(seeds_emit)
 res <- mclapply(idx, function(i)
   run_one(seeds_emit[i], stream$data[[i]], stream$fit[[i]], out_path),
   mc.cores = cores, mc.set.seed = FALSE)
+worker_errors <- which(vapply(res, function(x) inherits(x, "try-error"), logical(1)))
+if (length(worker_errors) > 0L) {
+  stop("worker errors for emitted seeds: ",
+       paste(seeds_emit[worker_errors], collapse = ", "))
+}
 done <- file.exists(out_path)
 cat("done; shard rows appended to", out_path, "(exists=", done, ")\n")

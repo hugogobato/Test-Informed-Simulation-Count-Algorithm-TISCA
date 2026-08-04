@@ -324,6 +324,18 @@ def _shared_cells(bundle_source, bundle_sha, row, repo_root):
         urllib.request.urlretrieve(MVBCF_CPP_URL, "/content/e3/MVBCF_Code.cpp")
         assert os.path.getsize("/content/e3/run_cell.R") > 1000
         assert os.path.getsize("/content/e3/MVBCF_Code.cpp") > 10000
+        with open("/content/e3/run_cell.R") as f:
+            run_cell_source = f.read()
+        required_fixes = [
+            "nthread = nthread_global",
+            "general_params = list(num_threads = nthread_global",
+            "acquired <- dir.create(lk",
+        ]
+        missing_fixes = [item for item in required_fixes if item not in run_cell_source]
+        assert not missing_fixes, (
+            "GitHub main is serving a stale run_cell.R. Commit and push the "
+            f"corrected driver before running this notebook; missing: {missing_fixes}"
+        )
         print("downloaded run_cell.R and upstream MVBCF_Code.cpp")
         """))
     code(cells, textwrap.dedent("""\
@@ -359,10 +371,11 @@ def _run_cells(row):
 
     The constants below were generated from `shard_table.csv`. They are
     assertions, not operator inputs. A dropped session can be restarted by
-    uploading this same notebook, because existing seed rows are skipped.
+    uploading this same notebook. Successful seed rows are preserved, while
+    failed or malformed checkpoint rows are backed up, removed, and retried.
     """)
     config = textwrap.dedent(f"""\
-        import csv, os, subprocess, time
+        import csv, os, shutil, subprocess, time
 
         DGP = {row['dgp']}
         N = {row['n']}
@@ -403,15 +416,66 @@ def _run_cells(row):
             out.append((start, previous))
             return out
 
+        expected = {{emitted_seed(i) for i in range(CLI_SEED_START, CLI_SEED_END + 1)}}
+
+        def checkpoint_seed(row):
+            raw = (row.get("seed") or "").strip()
+            try:
+                return int(raw)
+            except (TypeError, ValueError):
+                return None
+
         existing = set()
         if os.path.exists(OUTPUT_CSV):
             with open(OUTPUT_CSV, newline="") as f:
-                rows = list(csv.DictReader(f))
-            existing = {{int(r["seed"]) for r in rows if r.get("seed") not in (None, "")}}
-            assert len(existing) == len(rows), \\
-                "duplicate checkpoint seeds found; repair the Drive CSV before restarting"
-        expected = {{emitted_seed(i) for i in range(CLI_SEED_START, CLI_SEED_END + 1)}}
-        assert existing <= expected, "checkpoint contains a seed outside this shard"
+                reader = csv.DictReader(f)
+                fieldnames = reader.fieldnames
+                rows = list(reader)
+            if not fieldnames or "seed" not in fieldnames or "converged_flag" not in fieldnames:
+                raise RuntimeError("checkpoint CSV is missing required columns")
+
+            kept_rows = []
+            rejected = {{"malformed": 0, "failed": 0, "duplicate": 0}}
+            for row in rows:
+                seed = checkpoint_seed(row)
+                if seed is None or None in row or any(value is None for value in row.values()):
+                    rejected["malformed"] += 1
+                    continue
+                if seed not in expected:
+                    raise RuntimeError(
+                        f"checkpoint contains seed {{seed}} outside this shard; "
+                        "check that the correct CSV was uploaded"
+                    )
+                if row.get("converged_flag") != "1":
+                    rejected["failed"] += 1
+                    continue
+                if seed in existing:
+                    rejected["duplicate"] += 1
+                    continue
+                existing.add(seed)
+                kept_rows.append(row)
+
+            if any(rejected.values()):
+                backup = f"{{OUTPUT_CSV}}.pre_repair_{{int(time.time())}}.csv"
+                shutil.copy2(OUTPUT_CSV, backup)
+                temporary = OUTPUT_CSV + ".repair.tmp"
+                with open(temporary, "w", newline="") as f:
+                    writer = csv.DictWriter(f, fieldnames=fieldnames)
+                    writer.writeheader()
+                    writer.writerows(kept_rows)
+                os.replace(temporary, OUTPUT_CSV)
+                print("checkpoint repair:", rejected, "backup:", backup)
+
+        # A killed older run may leave either the former file lock or the new
+        # atomic lock directory behind. No R process is active at this point.
+        stale_lock = OUTPUT_CSV + ".lock"
+        if os.path.isdir(stale_lock):
+            shutil.rmtree(stale_lock)
+            print("removed stale checkpoint lock directory")
+        elif os.path.isfile(stale_lock):
+            os.remove(stale_lock)
+            print("removed stale checkpoint lock file")
+
         missing_raw = [i for i in range(CLI_SEED_START, CLI_SEED_END + 1)
                        if emitted_seed(i) not in existing]
         print("checkpoint:", len(existing), "rows; missing:", len(missing_raw))
@@ -442,13 +506,18 @@ def _run_cells(row):
         import csv, os
         with open(OUTPUT_CSV, newline="") as f:
             rows = list(csv.DictReader(f))
-        got = [int(r["seed"]) for r in rows]
+        malformed = [r.get("seed") for r in rows if checkpoint_seed(r) is None]
+        assert not malformed, f"checkpoint contains malformed seeds: {{malformed[:5]}}"
+        got = [checkpoint_seed(r) for r in rows]
         expected = list(range(EXPECTED_SEED_START, EXPECTED_SEED_END + 1))
-        assert len(got) == len(set(got))
-        assert set(got) == set(expected), "shard checkpoint is incomplete"
-        failures = sum(r.get("converged_flag") == "0" for r in rows)
+        duplicates = len(got) - len(set(got))
+        missing = sorted(set(expected) - set(got))
+        unexpected = sorted(set(got) - set(expected))
+        failures = [r for r in rows if r.get("converged_flag") != "1"]
         print("completed rows:", len(rows), "of", len(expected))
-        print("converged_flag failures:", failures)
+        print("duplicate seeds:", duplicates, "missing:", len(missing),
+              "unexpected:", len(unexpected))
+        print("converged_flag failures:", len(failures))
         print("checkpoint bytes:", os.path.getsize(OUTPUT_CSV))
         try:
             from google.colab import files
@@ -456,6 +525,13 @@ def _run_cells(row):
             print("Downloaded:", OUTPUT_CSV)
         except Exception as e:
             print("(Not on Colab / download skipped):", e)
+        assert duplicates == 0, "shard checkpoint contains duplicate seeds"
+        assert not unexpected, f"checkpoint has seeds outside this shard: {{unexpected[:5]}}"
+        assert not missing, f"shard checkpoint is incomplete; missing seeds: {{missing[:10]}}"
+        assert not failures, (
+            f"{{len(failures)}} replications failed; rerun the notebook to retry them. "
+            f"First errors: {{[r.get('error_message') for r in failures[:3]]}}"
+        )
         """))
     return cells
 
@@ -470,12 +546,15 @@ def _calibration_cells(row):
     notebooks are then run for their independent cell pilots.
     """)
     code(cells, textwrap.dedent("""\
-        import csv, statistics
+        import csv, math, statistics
         with open(OUTPUT_CSV, newline="") as f:
             rows = list(csv.DictReader(f))
         assert len(rows) == 50, "the DGP1 n=500 calibration pilot must have 50 rows"
         def values(key):
-            return [float(r[key]) for r in rows if r.get(key) not in (None, "")]
+            result = [float(r[key]) for r in rows]
+            assert len(result) == 50 and all(math.isfinite(x) for x in result), \\
+                f"{{key}} is incomplete or non-finite"
+            return result
         targets = {
             "bcf_pehe1": (9.3, 10.0, "BCF PEHE Y1"),
             "bcf_pehe2": (9.6, 10.3, "BCF PEHE Y2"),
@@ -507,8 +586,6 @@ def _sanity(nb, name):
 def write_outputs(repo_root, rows, bundle_source, bundle_sha):
     notebook_dir = repo_root / "notebooks" / "E3_shards"
     notebook_dir.mkdir(parents=True, exist_ok=True)
-    for old in notebook_dir.glob("E3_*.ipynb"):
-        old.unlink()
 
     row_by_name = {}
     for row in rows:

@@ -133,7 +133,8 @@ md(textwrap.dedent("""\
     """))
 
 code(textwrap.dedent("""\
-    vp = dfA["publisher"].replace("", dfA["venue"]).replace("", "unlisted")
+    vp = dfA["publisher"].mask(dfA["publisher"].eq(""), dfA["venue"])
+    vp = vp.replace("", "unlisted")
     vc2 = vp.value_counts(normalize=True) * 100
     vc2 = vc2.head(12).sort_values()
     fig, ax = plt.subplots(figsize=(9, 7))
