@@ -18,10 +18,12 @@ python notebooks/_generators/build_e3_notebooks.py \
   --bundle-sha256 '12d223bc0fcef624c1ff4cc35c5d7ecc1b1f9b05aa84ecd9d9e4a5a3382bae3c'
 ```
 
-The generated notebooks download the folder with `gdown`, locate both
-`tisca_rlib.tar.gz` and `tisca_rlib.sha256`, verify the downloaded checksum
-against the embedded digest and the tarball bytes, and then restore the R
-library. No cell needs editing after that generation step. Each notebook
+The generated notebooks download the folder with `gdown`, locate
+`tisca_rlib.tar.gz`, and verify its bytes against the embedded digest. If the
+optional `tisca_rlib.sha256` sidecar is present, it is checked too. The sidecar
+is not required in the shared folder because the tarball itself is always
+verified. The notebooks then restore the R library. No cell needs editing after
+that generation step. Each notebook
 downloads the upstream `MVBCF_Code.cpp` at run time, sets `TISCA_MVBCF_CPP` to
 that downloaded copy, restores the R bundle, uses `mc.cores = 2`, and runs
 model fits with one thread. The driver appends every completed replication,

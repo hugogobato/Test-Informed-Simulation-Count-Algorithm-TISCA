@@ -9,7 +9,9 @@ for collection and completeness checks.
 
 The R library bundle source and SHA256 are generation-time arguments.  The
 source may be a direct tarball URL or a public Google Drive folder containing
-``tisca_rlib.tar.gz`` and ``tisca_rlib.sha256``.  Before the bundle exists,
+``tisca_rlib.tar.gz`` and, optionally, ``tisca_rlib.sha256``.  The embedded
+SHA256 is always checked against the downloaded tarball, so the sidecar is
+useful metadata but is not required in the shared folder.  Before the bundle exists,
 ``--allow-unbuilt-bundle`` may be used to stage notebooks with a deliberately
 invalid sentinel.  Those notebooks fail loudly in their restore cell until a
 real bundle is baked in by regenerating the set.
@@ -258,10 +260,15 @@ def _shared_cells(bundle_source, bundle_sha, row, repo_root):
             tar_candidates = sorted(BUNDLE_DOWNLOAD_DIR.rglob("tisca_rlib.tar.gz"))
             sha_candidates = sorted(BUNDLE_DOWNLOAD_DIR.rglob("tisca_rlib.sha256"))
             assert len(tar_candidates) == 1, f"expected one tarball, found {{tar_candidates}}"
-            assert len(sha_candidates) == 1, f"expected one checksum file, found {{sha_candidates}}"
-            published_sha = sha_candidates[0].read_text().split()[0].lower()
-            assert published_sha == BUNDLE_SHA256.lower(), \\
-                "published tisca_rlib.sha256 differs from the generated notebook"
+            assert len(sha_candidates) <= 1, f"expected at most one checksum file, found {{sha_candidates}}"
+            if sha_candidates:
+                published_sha = sha_candidates[0].read_text().split()[0].lower()
+                assert published_sha == BUNDLE_SHA256.lower(), \\
+                    "published tisca_rlib.sha256 differs from the generated notebook"
+                print("verified published checksum sidecar:", sha_candidates[0])
+            else:
+                print("no tisca_rlib.sha256 sidecar in the shared folder; "
+                      "verifying the tarball against the embedded SHA256")
             download_path = "/content/_dl_tisca_rlib.tar.gz"
             shutil.copy2(tar_candidates[0], download_path)
             with open(download_path, "rb") as f:
