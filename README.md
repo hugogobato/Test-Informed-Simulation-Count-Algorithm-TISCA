@@ -71,7 +71,7 @@ LICENSE                 # MIT
   the bundle exists — a lockfile without resolved versions would fail
   `renv::restore()`, so none is committed before then. On Google Colab the heavy packages
   (`stochtree`, `dbarts`, `bartCause`, `skewBART`, `mvbcf`, `mvtnorm`,
-  `scoringRules`, `matrixStats`, `progress`, `MCS`) are precompiled into a
+  `bcf`, `scoringRules`, `matrixStats`, `progress`, `MCS`) are precompiled into a
   single library bundle and restored in seconds: see the
   `notebooks/P0T4_build_rlib_bundle.ipynb` notebook and the seed/RNG protocol.
 - **Python:** see `environment.yml` and `requirements.txt`.

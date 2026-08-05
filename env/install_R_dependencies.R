@@ -26,6 +26,7 @@ cat("target library:", LIB, "\n\n")
 
 CRAN_PKGS <- c(
   "stochtree",     # the calibrated BCF benchmark (E3)
+  "bcf",           # original paper BCF implementation for the paired Round 0 benchmark
   "dbarts",        # BART / MVBART
   "bartCause",     # treatment-effect BART
   "mvtnorm",       # DGP sampling

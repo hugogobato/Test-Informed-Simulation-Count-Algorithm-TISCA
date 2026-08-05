@@ -15,6 +15,7 @@ model described in `REVISION_PLAN.md` §5.
 | `E1_moduleA.ipynb` | **legacy P3-T2 runner** | earlier standalone Module-A runner retained for provenance; use `E1_modA_C_D.ipynb` for the complete planned A/C/D sweep. |
 | `E3_mvbcf_shard.ipynb` | **P3-T5(d)** | historical E3 worker entry point, regenerated from the first confirmatory shard; the ready-made per-shard notebooks are in `E3_shards/`. It restores the P0-T4 bundle, compiles the upstream `MVBCF_Code.cpp`, checkpoints each replication under `/content`, and verifies seed completeness. |
 | `E3_round0_pilot_calibration.ipynb` | **P3-T5(e)** | Round 0 pilot (50 independent-seed reps of DGP1/n=500) plus the **P3-T5(e) gate**: compare the calibrated `stochtree::bcf` means to McJames et al. DGP1 Table 2. No confirmatory shard runs until this passes. |
+| `E3_round0_dual_bcf_pilot.ipynb` | **BCF diagnostic Round 0** | Paired DGP1/n=500 pilot using the corrected `stochtree::bcf` translation and the original `bcf` package settings. Reports separate PEHE and coverage bands in one CSV. |
 | `E4_bibliometric_analysis.ipynb` | **P3-T1(b)** | clones the repo when uploaded alone, runs `code_bibliometrics.py` if `bibliometric_coded.csv` is absent, then recounts the section **from code** (no percentage literals), corrects denominators (99/88), and emits `Fig_bib_*.png`. |
 
 `P0T4_build_rlib_bundle.ipynb` is the main notebook to run once during Phase 0.
@@ -47,11 +48,17 @@ downloads `run_cell.R` (this repo) and the upstream `MVBCF_Code.cpp`, compiles
 the cpp with `sourceCpp`, and runs one shard, checkpointing each replication under
 `/content`. `E3_round0_pilot_calibration.ipynb` runs the independent pilot and
 the P3-T5(e) `stochtree::bcf` calibration gate that must pass before any
-confirmatory shard launches.
+confirmatory shard launches. `E3_round0_dual_bcf_pilot.ipynb` is a separate
+paired diagnostic: it runs the corrected stochtree configuration and the paper
+`bcf` implementation on the same 50 seeds. Its diagnostic target failures do
+not stop the notebook, so both method results remain available for comparison.
 
 The notebooks are generated from `notebooks/_generators/` (`build_p0t4_bundle_nb.py`,
 `build_p1_verification_nb.py`, `build_e1_selfcheck_nb.py`,
 `build_e1_moduleA_nb.py`, `build_e1_modules_nb.py`, `build_e3_notebooks.py`,
-`build_e4_analysis_nb.py`). Regenerate the three complete E1 runners with
+`build_e3_dual_round0_notebook.py`, `build_e4_analysis_nb.py`). Regenerate the
+dual BCF notebook with
+`python notebooks/_generators/build_e3_dual_round0_notebook.py` and regenerate the
+three complete E1 runners with
 `python notebooks/_generators/build_e1_modules_nb.py`. Keep the generator and the
 `.ipynb` files in sync when you edit either.
