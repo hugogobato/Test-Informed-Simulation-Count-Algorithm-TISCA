@@ -12,10 +12,11 @@
 # P3-T5[a], and docs/seed_rng_protocol.md):
 #   1. Fixed integer seeds passed as CLI args; as.numeric(Sys.time()) is
 #      deleted. n is a CLI argument, not sample(c(100,500,1000),1).
-#   2. One BCF benchmark, calibrated: stochtree::bcf with num_gfr = 50 AND
-#      McJames's priors (50 prognostic / 20 treatment trees, outcome-specific
-#      sigma2_leaf_init). The v1 cold-start and warm-start-default-prior
-#      variants are both deleted. Gated by P3-T5(e).
+#   2. One BCF benchmark, calibrated: stochtree::bcf translated to the paper's
+#      BCF settings (num_gfr = 0, 50 prognostic / 20 treatment trees, 500 burn-in
+#      and 500 posterior draws, fixed standardized forest variances 1 and
+#      0.140625, and the paper-equivalent residual prior). The v1 cold-start
+#      and warm-start-default-prior variants are both deleted. Gated by P3-T5(e).
 #   3. Separate L'Ecuyer-CMRG RNG streams for data generation and model fits,
 #      interleaved as substreams (2j, 2j+1) from one cell master (§3.3).
 #   4. MVBCF fitted via fast_bart() from the upstream MVBCF_Code.cpp through
@@ -250,6 +251,16 @@ append_csv_locked <- function(df, path) {
   append_csv(df, path)
 }
 
+# The paper bcf package computes this lambda when lambda=NULL. Reproduce that
+# calculation in standardized outcome units and map its inverse-gamma
+# (nu/2, nu*lambda/2) prior to stochtree's shape/scale parameters below.
+paper_lambda <- function(y, z, x_control, pihat, nu = 3, sigq = 0.9) {
+  ystd <- (y - mean(y)) / sd(y)
+  x_c <- cbind(x_control, pihat)
+  sighat <- summary(lm(ystd ~ z + as.matrix(x_c)))$sigma
+  (sighat^2 * qchisq(1 - sigq, nu)) / nu
+}
+
 # -----------------------------------------------------------------------------
 # Build one output row from a completed replication.
 # -----------------------------------------------------------------------------
@@ -403,19 +414,39 @@ run_one <- function(seed_emit, d_stream, f_stream, out_path) {
     row[["error_message"]] <- paste0("mvbcf: ", ifelse(is.na(err_msg), "failed", err_msg))
   }
 
-  # ---- BCF (calibrated stochtree; outcome-specific prior scale) ----
+  # ---- BCF (paper-equivalent stochtree specification) ----
   for (k in 1:2) {
     f_seed <- use_model_stream(f_stream, paste0("bcf", k))
     row[[paste0("model_seed_bcf", k)]] <- f_seed
+    # bcf's automatic lambda is computed after standardizing y. Stochtree's
+    # standardize=TRUE then uses the same outcome units, so pass the matching
+    # inverse-gamma shape/scale explicitly.
+    lambda <- tryCatch(
+      paper_lambda(Y[, k], Z, X2, p),
+      error = function(e) { err_msg <<- conditionMessage(e); NA_real_ })
     t_bc <- system.time({
       bc <- tryCatch(
-        stochtree::bcf(X2, Z, Y[, k], X_test = X2_test,
-                       prognostic_forest_params = list(num_trees = n_tree_mu, sigma2_leaf_init = sd(Y[, k])^2),
-                       treatment_effect_forest_params = list(num_trees = n_tree_tau, sigma2_leaf_init = (0.375*sd(Y[, k]))^2),
-                       Z_test = Z_test, propensity_train = p, propensity_test = p_test,
-                       num_burnin = n_burn, num_mcmc = n_mcmc, num_gfr = 50,
-                       general_params = list(num_threads = nthread_global,
-                                             random_seed = f_seed)),
+        stochtree::bcf(
+          X_train = X2, Z_train = Z, y_train = Y[, k],
+          propensity_train = p, X_test = X2_test, Z_test = Z_test,
+          propensity_test = p_test, num_gfr = 0,
+          num_burnin = n_burn, num_mcmc = n_mcmc,
+          general_params = list(
+            standardize = TRUE, sample_sigma2_global = TRUE,
+            sigma2_global_shape = 3 / 2,
+            sigma2_global_scale = if (is.finite(lambda)) 3 * lambda / 2 else 1,
+            propensity_covariate = "prognostic", adaptive_coding = FALSE,
+            num_chains = 1, num_threads = nthread_global, random_seed = f_seed),
+          prognostic_forest_params = list(
+            num_trees = n_tree_mu, alpha = 0.95, beta = 2,
+            min_samples_leaf = 1, max_depth = -1,
+            sample_sigma2_leaf = FALSE,
+            sigma2_leaf_init = 1^2 / n_tree_mu),
+          treatment_effect_forest_params = list(
+            num_trees = n_tree_tau, alpha = 0.25, beta = 3,
+            min_samples_leaf = 1, max_depth = -1,
+            sample_sigma2_leaf = FALSE,
+            sigma2_leaf_init = 0.375^2 / n_tree_tau)),
         error = function(e) { err_msg <<- conditionMessage(e); NULL })
     })
     row[[paste0("fit_seconds_bcf", k)]] <- as.numeric(t_bc[["elapsed"]])

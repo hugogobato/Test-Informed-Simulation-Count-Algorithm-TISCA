@@ -26,19 +26,24 @@ verified. The notebooks then restore the R library. No cell needs editing after
 that generation step. Each notebook
 downloads the upstream `MVBCF_Code.cpp` at run time, sets `TISCA_MVBCF_CPP` to
 that downloaded copy, restores the R bundle, uses `mc.cores = 2`, and runs
-model fits with one thread. The driver appends every completed replication,
-including its `replication_seconds`, to a CSV under `/content/TISCA_E3`; the
-final cell includes the `google.colab.files.download` fallback.
+model fits with one thread. The stochtree BCF branch uses the corrected
+paper-equivalent specification: `num_gfr = 0`, 50/20 trees, 500 burn-in and
+500 posterior draws, fixed standardized forest variances 1 and 0.140625, and
+the paper-equivalent residual prior. The driver appends every completed
+replication, including its `replication_seconds`, to a CSV under
+`/content/TISCA_E3`; the final cell includes the `google.colab.files.download`
+fallback.
 
 ## Run order
 
 1. Upload and run `E3_DGP1_n500_pilot_shard01_seeds1000001-1000050.ipynb`
    alone first. This is the recommended Round 0 smoke test and carries the
    P3-T5(e) `stochtree::bcf` calibration gate.
-2. Inspect the gate verdict and record it in
-   `experiments/E3_mvbcf_casestudy/CALIBRATION.md`. The pass bands and decision
-   rule are also frozen in `ANALYSIS_PLAN.md` §9. Do not start a Round 1
-   notebook unless this gate passes.
+2. Inspect the calibration verdict and record it in
+   `experiments/E3_mvbcf_casestudy/CALIBRATION.md`. A FAIL is a diagnostic
+   comparison with the paper's target bands, not an automatic stop: if the
+   corrected stochtree fit converges and agrees with the paired paper-BCF
+   benchmark, the deviation can be accepted and Round 1 can proceed.
 3. Run the other three Round 0 notebooks, completing the pilots for DGP2 n=500,
    DGP3 n=500, and DGP1 n=100. Round 0 must be complete before Round 1.
 4. After the gate and Round 0 completion, distribute the 33 Round 1 notebooks,

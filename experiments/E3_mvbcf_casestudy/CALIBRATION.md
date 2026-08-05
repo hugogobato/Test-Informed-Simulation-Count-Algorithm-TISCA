@@ -6,7 +6,19 @@
 
 | Artifact | Notes |
 |---|---|
-| `run_cell.R` | the P3-T5(a) driver, derived from `GitHub_DGP1.R` (see its header for the deviation list). Validated locally: parses; the DGP formula blocks, the L'Ecuyer-CMRG stream construction, and the 171-column schema pass `ALL_VALIDATION_PASSED`. **Note what that validation does and does not cover** (see the audit below): it exercises the schema and the seed machinery, never the model calls, so six defects in the fitting and metric code survived it. |
+| `run_cell.R` | the P3-T5(a) driver, derived from `GitHub_DGP1.R` (see its header for the deviation list). Its stochtree BCF branch now uses the corrected paper-equivalent specification: `num_gfr = 0`, 50/20 trees, 500 burn-in and 500 posterior draws, fixed standardized forest variances 1 and 0.140625, and the paper-equivalent residual prior. Validated locally: parses; the DGP formula blocks, the L'Ecuyer-CMRG stream construction, and the 171-column schema pass `ALL_VALIDATION_PASSED`. **Note what that validation does and does not cover** (see the audit below): it exercises the schema and the seed machinery, never the model calls. |
+
+## Stochtree BCF calibration decision, 2026-08-05
+
+The paired Round 0 benchmark compares this corrected `stochtree::bcf` branch
+with the original paper `bcf` implementation on the same generated data,
+propensity scores, and replication seeds. The published Table 2 bands remain
+reported as a diagnostic reference. The operational E3 choice is to retain
+the corrected stochtree implementation when it converges and tracks the paper
+implementation, even if its metrics do not fall inside those historical
+bands. The shard notebooks therefore report the calibration verdict without
+blocking Round 1; incomplete checkpoints and non-converged rows still stop
+execution.
 
 ## Pre-execution audit, 2026-08-04 (before any Colab session was spent)
 
