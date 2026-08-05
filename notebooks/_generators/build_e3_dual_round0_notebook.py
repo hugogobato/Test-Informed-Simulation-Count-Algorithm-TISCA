@@ -48,7 +48,8 @@ def _bundle_restore_cell(bundle_source, bundle_sha):
             result = subprocess.run(
                 [sys.executable, "-m", "gdown", "--folder", BUNDLE_FOLDER_URL,
                  "--output", str(download_dir), "--remaining-ok"],
-                capture_output=True, text=True)
+                capture_output=True, text=True,
+                encoding="utf-8", errors="replace")
             print(result.stdout[-4000:])
             if result.returncode != 0:
                 print(result.stderr[-4000:])
@@ -117,7 +118,9 @@ def build_notebook(bundle_source, bundle_sha):
         import os, platform, subprocess
 
         def sh(cmd):
-            p = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+            p = subprocess.run(
+                cmd, shell=True, capture_output=True, text=True,
+                encoding="utf-8", errors="replace")
             return p.stdout.strip()
 
         print("hostname:", platform.node() or "n/a")
@@ -132,12 +135,14 @@ def build_notebook(bundle_source, bundle_sha):
             ["bash", "-lc", "apt-get -qq update >/dev/null && "
              "apt-get -qq install -y --no-install-recommends "
              "r-base r-base-dev libcurl4-openssl-dev >/dev/null 2>&1"],
-            capture_output=True, text=True)
+            capture_output=True, text=True, encoding="utf-8", errors="replace")
         if p.returncode != 0:
             print(p.stdout[-1000:])
             print(p.stderr[-2000:])
             raise RuntimeError("R installation failed")
-        print(subprocess.check_output(["R", "--version"], text=True).splitlines()[0])
+        print(subprocess.check_output(
+            ["R", "--version"], text=True,
+            encoding="utf-8", errors="replace").splitlines()[0])
         """))
     code(cells, _bundle_restore_cell(bundle_source, bundle_sha))
     code(cells, textwrap.dedent("""
@@ -171,7 +176,8 @@ def build_notebook(bundle_source, bundle_sha):
              "if (!requireNamespace('bcf', quietly=TRUE)) "
              "install.packages('bcf', lib='/content/tisca_rlib/rlib', "
              "repos='https://cloud.r-project.org')"],
-            env=env, capture_output=True, text=True)
+            env=env, capture_output=True, text=True,
+            encoding="utf-8", errors="replace")
         print(install.stdout[-3000:])
         if install.returncode != 0:
             print(install.stderr[-3000:])
@@ -181,7 +187,7 @@ def build_notebook(bundle_source, bundle_sha):
              ".libPaths(c(Sys.getenv('R_LIBS'), .libPaths())); "
              "cat('bcf=', as.character(packageVersion('bcf')), '\\n'); "
              "cat('stochtree=', as.character(packageVersion('stochtree')), '\\n')"],
-            env=env, text=True))
+            env=env, text=True, encoding="utf-8", errors="replace"))
         """))
     code(cells, textwrap.dedent(f"""
         import csv, os, shutil, time
@@ -282,7 +288,9 @@ def build_notebook(bundle_source, bundle_sha):
                        "--mode", MODE]
             print("running:", " ".join(command))
             t0 = time.time()
-            result = subprocess.run(command, env=env, capture_output=True, text=True)
+            result = subprocess.run(
+                command, env=env, capture_output=True, text=True,
+                encoding="utf-8", errors="replace")
             print(result.stdout[-8000:])
             print("range wall-clock: %.1f min" % ((time.time() - t0) / 60.0))
             if result.returncode != 0:
