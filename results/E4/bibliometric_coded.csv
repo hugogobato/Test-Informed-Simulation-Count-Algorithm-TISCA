@@ -410,7 +410,7 @@ https://doi.org/10.48550/arxiv.2202.01336,"@misc{https://doi.org/10.48550/arxiv.
   year = {2022},
   copyright = {arXiv.org perpetual,  non-exclusive license}
 }",misc,,arXiv,2022,N,preprint,preprint-server,entry type @misc,0,0,100,100,1,REVIEW_REQUIRED,REVIEW_REQUIRED,REVIEW_REQUIRED,REVIEW_REQUIRED,REVIEW_REQUIRED,,REVIEW_REQUIRED,1
-row_33,"@InProceedings{pmlr-v202-wu23i,
+pmlr-v202-wu23i,"@InProceedings{pmlr-v202-wu23i,
   title = 	 {Stable Estimation of Heterogeneous Treatment Effects},
   author =       {Wu, Anpeng and Kuang, Kun and Xiong, Ruoxuan and Li, Bo and Wu, Fei},
   booktitle = 	 {Proceedings of the 40th International Conference on Machine Learning},
@@ -424,7 +424,7 @@ row_33,"@InProceedings{pmlr-v202-wu23i,
   pdf = 	 {https://proceedings.mlr.press/v202/wu23i/wu23i.pdf},
   url = 	 {https://proceedings.mlr.press/v202/wu23i.html},
 
-}",,Proceedings of the 40th International Conference on Machine Learning,PMLR,2023,Y,hybrid/subscription,other,not listed in DOAJ,0,0,10,10,1,REVIEW_REQUIRED,REVIEW_REQUIRED,REVIEW_REQUIRED,REVIEW_REQUIRED,REVIEW_REQUIRED,,REVIEW_REQUIRED,0
+}",inproceedings,Proceedings of the 40th International Conference on Machine Learning,PMLR,2023,Y,conference,conference,entry type / proceedings title,0,0,10,10,1,REVIEW_REQUIRED,REVIEW_REQUIRED,REVIEW_REQUIRED,REVIEW_REQUIRED,REVIEW_REQUIRED,,REVIEW_REQUIRED,0
 Gao2021,"@article{Gao2021,
   title = {Assessment of heterogeneous treatment effect estimation accuracy via matching},
   volume = {40},
@@ -842,7 +842,7 @@ sloczynski2022doubly,"@article{sloczynski2022doubly,
   author={S{\l}oczy{\'n}ski, Tymon and Uysal, S Derya and Wooldridge, Jeffrey M},
   year={2022},
   publisher={JSTOR}
-}",article,,JSTOR,2022,Y,working-paper,other,no journal field,0,0,1000,1000,1,REVIEW_REQUIRED,REVIEW_REQUIRED,REVIEW_REQUIRED,REVIEW_REQUIRED,REVIEW_REQUIRED,,REVIEW_REQUIRED,0
+}",article,,JSTOR,2022,REVIEW_REQUIRED,working-paper,other,no journal or booktitle field,0,0,1000,1000,1,REVIEW_REQUIRED,REVIEW_REQUIRED,REVIEW_REQUIRED,REVIEW_REQUIRED,REVIEW_REQUIRED,,REVIEW_REQUIRED,0
 Scotina2019,"@article{Scotina2019,
   title = {Matching estimators for causal effects of multiple treatments},
   volume = {29},
@@ -1032,7 +1032,7 @@ Liu2024,"@article{Liu2024,
   month = jun,
   pages = {457–479}
 }",article,Psychological Methods,American Psychological Association (APA),2024,Y,hybrid/subscription,society,not listed in DOAJ,0,0,500,500,1,REVIEW_REQUIRED,REVIEW_REQUIRED,REVIEW_REQUIRED,REVIEW_REQUIRED,REVIEW_REQUIRED,,REVIEW_REQUIRED,0
-row_82,"@InProceedings{pmlr-v151-xu22c,
+pmlr-v151-xu22c,"@InProceedings{pmlr-v151-xu22c,
   title = 	 { Calibration Error for Heterogeneous Treatment Effects },
   author =       {Xu, Yizhe and Yadlowsky, Steve},
   booktitle = 	 {Proceedings of The 25th International Conference on Artificial Intelligence and Statistics},
@@ -1045,7 +1045,7 @@ row_82,"@InProceedings{pmlr-v151-xu22c,
   publisher =    {PMLR},
   pdf = 	 {https://proceedings.mlr.press/v151/xu22c/xu22c.pdf},
   url = 	 {https://proceedings.mlr.press/v151/xu22c.html},
-}",,Proceedings of The 25th International Conference on Artificial Intelligence and Statistics,PMLR,2022,Y,hybrid/subscription,other,not listed in DOAJ,0,0,1000,1000,1,REVIEW_REQUIRED,REVIEW_REQUIRED,REVIEW_REQUIRED,REVIEW_REQUIRED,REVIEW_REQUIRED,,REVIEW_REQUIRED,0
+}",inproceedings,Proceedings of The 25th International Conference on Artificial Intelligence and Statistics,PMLR,2022,Y,conference,conference,entry type / proceedings title,0,0,1000,1000,1,REVIEW_REQUIRED,REVIEW_REQUIRED,REVIEW_REQUIRED,REVIEW_REQUIRED,REVIEW_REQUIRED,,REVIEW_REQUIRED,0
 Ress2024,"@article{Ress2024,
   title = {Comparing methods for estimating causal treatment effects of administrative health data: A plasmode simulation study},
   volume = {33},
@@ -1096,7 +1096,7 @@ Abadie2002,"@book{Abadie2002,
   author = {Abadie,  Alberto and Imbens,  Guido},
   year = {2002},
   month = oct 
-}",book,,National Bureau of Economic Research (NBER),2002,Y,book-chapter,other,entry type @incollection/@book,0,0,10000,10000,1,REVIEW_REQUIRED,REVIEW_REQUIRED,REVIEW_REQUIRED,REVIEW_REQUIRED,REVIEW_REQUIRED,,REVIEW_REQUIRED,0
+}",book,,National Bureau of Economic Research (NBER),2002,REVIEW_REQUIRED,working-paper,other,no journal or booktitle field,0,0,10000,10000,1,REVIEW_REQUIRED,REVIEW_REQUIRED,REVIEW_REQUIRED,REVIEW_REQUIRED,REVIEW_REQUIRED,,REVIEW_REQUIRED,0
 Zhao2004,"@article{Zhao2004,
   title = {Using Matching to Estimate Treatment Effects: Data Requirements,  Matching Metrics,  and Monte Carlo Evidence},
   volume = {86},

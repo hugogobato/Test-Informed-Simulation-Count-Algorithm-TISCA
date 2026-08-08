@@ -41,6 +41,29 @@ bias the reported estimates or the level of the reported tests.
 **Disclose in the response letter.** The amendment was written after the
 confirmatory data was collected and its column means inspected.
 
+**Status: implemented, no re-run required.** All four cells already hold a complete
+1000-replication confirmatory block with zero `converged_flag` failures, so the
+amendment is executed purely as a row split of data in hand:
+`collect_shards.py --pilot-size 100` writes the two blocks and the `analysis_phase`
+label, and `analyse_e3.py` performs the planning and the confirmatory inference on
+the 900 retained replications. `shard_table.csv` marks the four Round-0 pilot rows
+`status = superseded` so they are neither read nor required.
+
+The pre-declared `J0` sensitivity comes out as follows (`J*` per cell, over the six
+primary contrasts, at the precision target `0.05 x sd(tau)`):
+
+| cell | J0 = 25 | J0 = 50 | J0 = 100 |
+|---|---:|---:|---:|
+| DGP1 n = 500 | 34 | 27 | 30 |
+| DGP2 n = 500 | 19 | 17 | 15 |
+| DGP3 n = 500 | 51 | 34 | 34 |
+| DGP1 n = 100 | 144 | 108 | 96 |
+
+Reported whichever way it falls, as the amendment requires: `J0 = 100` does **not**
+uniformly give the smallest `J*` (DGP1 n = 500 gives 27 at `J0 = 50` against 30 at
+`J0 = 100`). What it does give is the stability the amendment argued for, and the
+choice is not doing the paper any favours.
+
 ### Round 0 status
 
 **Supersession note.** The pilot CSVs on the reserved seed block that use the FULL

@@ -3,9 +3,22 @@
 
 The generated notebooks are:
 
-* ``E1_modA_C_D.ipynb``: Modules A, C, and D, 840 + 243 + 216 cells;
-* ``E1_modB_shard1.ipynb``: the first 300 Module-B cells;
-* ``E1_modB_shard2.ipynb``: the remaining 300 Module-B cells.
+* ``E1_modA_C_D.ipynb``: Modules A, C, and D, 864 + 243 + 216 = 1,323 cells;
+* ``E1_modB_shard1.ipynb``: the first half of the 660 Module-B cells;
+* ``E1_modB_shard2.ipynb``: the remainder.
+
+**The grid is not defined here.** It lives in ``tisca/python/tisca/outermc/
+e1_grid.py`` and these notebooks import it, exactly as the local runner
+``experiments/E1_operating_characteristics/run_e1_grid.py`` does. That module is
+the single source of truth for the 1,983 cells.
+
+The generator used to carry its own copy of the grid as a string literal, and the
+two drifted: this file was still emitting the pre-repair 1,299-cell version, in
+which the empirical family was one entry rather than the two it was split into
+(row bootstrap plus copula variant), and in which every empirical cell was handed
+a numeric ``rho``. Since the row bootstrap reproduces its matrix's own dependence
+and refuses an imposed ``rho``, every one of those cells would now fail at run
+time. Importing the canonical grid is what stops that recurring.
 
 All three notebooks use the pure-Python P2-T3 harness, checkpoint one completed
 cell at a time under ``/content``, and offer the CSV through
@@ -20,11 +33,19 @@ Regenerate all three with::
 from __future__ import annotations
 
 import json
+import sys
 import textwrap
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT.parent / "tisca" / "python"))
+
+from tisca.outermc import e1_grid  # noqa: E402  (needs the path above)
+
+#: Module B is split across two Colab sessions; the boundary is derived, not typed.
+_B_TOTAL = e1_grid.EXPECTED["B"]
+B_SHARD_BOUNDS = {1: (0, _B_TOTAL // 2), 2: (_B_TOTAL // 2, _B_TOTAL)}
+ACD_TOTAL = sum(e1_grid.EXPECTED[m] for m in "ACD")
 
 
 def _md(cells: list[dict], source: str) -> None:
@@ -80,7 +101,7 @@ OUTPUT_ROOT = "/content/TISCA_E1"
 os.makedirs(OUTPUT_ROOT, exist_ok=True)
 print("Outputs/checkpoints:", OUTPUT_ROOT)
 
-from tisca.outermc import engine, summarize_ocs
+from tisca.outermc import e1_grid, engine, summarize_ocs
 from tisca import multiplicity
 
 ALPHA = 0.05
@@ -187,201 +208,56 @@ def download_fallback(output_file):
 '''
 
 
-def _cfg(**kwargs: object) -> dict:
-    cfg = {
-        "design": "D4",
-        "family": "normal",
-        "rho": 0.0,
-        "sigma_a": 1.0,
-        "sigma_b": 1.0,
-        "theta": 0.0,
-        "sigma_D": None,
-        "R": 5000,
-        "J0": 50,
-        "Jmax": 1000,
-        "alpha": 0.05,
-        "alpha_adj": 0.05,
-        "mode": 1,
-        "delta": 0.5,
-        "power_target": 0.80,
-        "gamma": 0.20,
-        "correction": "none",
-        "K": 1,
-        "matrix": "EMPIRICAL_MATRIX" if kwargs.get("family") == "empirical" else None,
-        "seed": 0,
-        "fixed_J": None,
-        "mcse": 0.05,
-        "batch": 50,
-        "B": 50,
-    }
-    cfg.update(kwargs)
-    return cfg
+GRID_CODE = r'''
+# The grid comes from the repository, never from a copy pasted into this notebook:
+# tisca/python/tisca/outermc/e1_grid.py is the single source of truth for all
+# 1,983 cells, and experiments/E1_operating_characteristics/run_e1_grid.py reads
+# exactly the same object. `matrix` is threaded in here because the two empirical
+# families need the real loss pair; the row-bootstrap variant carries rho=None,
+# which is why the grid must not be retyped by hand.
+FULL_GRID = e1_grid.make_grid("ABCD", matrix=EMPIRICAL_MATRIX,
+                              planning_alpha=multiplicity.planning_alpha)
+ACD_GRID = [c for c in FULL_GRID if c["module"] in ("A", "C", "D")]
+MODULE_B_GRID = [c for c in FULL_GRID if c["module"] == "B"]
 
-
-def _cell(module: str, index: int, factors: dict, config: dict) -> dict:
-    """Build a JSON-safe cell descriptor; replace the matrix symbol in notebook code."""
-    parts = [module] + [f"{k}={v}" for k, v in factors.items()]
-    return {
-        "cell_id": f"{module}_{index:04d}",
-        "module": module,
-        "factors": {"cell_index": index, **factors},
-        "config": config,
-        "label": "|".join(parts),
-    }
-
-
-def _acd_grid_code() -> str:
-    return r'''
-def make_acd_grid():
-    cells = []
-    index = 0
-
-    # Module A: F(7) x rho(5) x theta(4) x Design(6), K=1, J0=50, B=50.
-    for family, rho, theta_mult, design in itertools.product(
-        ["normal", "lognormal", "gamma", "mix", "beta", "t3", "empirical"],
-        [-0.3, 0.0, 0.3, 0.6, 0.9],
-        [0.0, 0.5, 1.0, 2.0],
-        ["D1", "D2", "D3", "D4", "D5", "D6"],
-    ):
-        factors = dict(module_cell="A", family=family, rho=rho,
-                       theta_mult=theta_mult, design=design, J0=50, B=50,
-                       sigma_ratio=1.0)
-        config = {
-            "design": design, "family": family, "rho": rho,
-            "sigma_a": 1.0, "sigma_b": 1.0, "theta": DELTA * theta_mult,
-            "sigma_D": None, "R": 5000, "J0": 50, "Jmax": JMAX,
-            "alpha": ALPHA, "alpha_adj": ALPHA, "mode": 1, "delta": DELTA,
-            "power_target": 0.80, "gamma": 0.20, "correction": "none",
-            "K": 1, "matrix": EMPIRICAL_MATRIX if family == "empirical" else None,
-            "seed": 100000 + index, "fixed_J": None, "mcse": 0.05,
-            "batch": 50, "B": 50,
-        }
-        cells.append(dict(cell_id=f"A_{index:04d}", module="A",
-                          factors=factors, config=config))
-        index += 1
-
-    # Module C: J0(3) x B(3) x F(3) x rho(3) x Design(3), theta=delta.
-    for J0, B, family, rho, design in itertools.product(
-        [25, 50, 100], [25, 50, 100], ["normal", "lognormal", "gamma"],
-        [-0.3, 0.3, 0.9], ["D2", "D3", "D4"],
-    ):
-        factors = dict(module_cell="C", family=family, rho=rho,
-                       theta_mult=1.0, design=design, J0=J0, B=B,
-                       sigma_ratio=1.0)
-        config = {
-            "design": design, "family": family, "rho": rho,
-            "sigma_a": 1.0, "sigma_b": 1.0, "theta": DELTA,
-            "sigma_D": None, "R": 5000, "J0": J0, "Jmax": JMAX,
-            "alpha": ALPHA, "alpha_adj": ALPHA, "mode": 1, "delta": DELTA,
-            "power_target": 0.80, "gamma": 0.20, "correction": "none",
-            "K": 1, "matrix": None, "seed": 200000 + index,
-            "fixed_J": None, "mcse": 0.05, "batch": B, "B": B,
-        }
-        cells.append(dict(cell_id=f"C_{index - 840:04d}", module="C",
-                          factors=factors, config=config))
-        index += 1
-
-    # Module D: sigma-ratio(2) x F(3) x rho(3) x theta(2) x Design(6).
-    for sigma_ratio, family, rho, theta_mult, design in itertools.product(
-        [1.0, 2.0], ["normal", "lognormal", "gamma"], [-0.3, 0.3, 0.9],
-        [0.0, 1.0], ["D1", "D2", "D3", "D4", "D5", "D6"],
-    ):
-        factors = dict(module_cell="D", family=family, rho=rho,
-                       theta_mult=theta_mult, design=design, J0=50, B=50,
-                       sigma_ratio=sigma_ratio)
-        config = {
-            "design": design, "family": family, "rho": rho,
-            "sigma_a": sigma_ratio, "sigma_b": 1.0,
-            "theta": DELTA * theta_mult, "sigma_D": None, "R": 5000,
-            "J0": 50, "Jmax": JMAX, "alpha": ALPHA, "alpha_adj": ALPHA,
-            "mode": 1, "delta": DELTA, "power_target": 0.80, "gamma": 0.20,
-            "correction": "none", "K": 1, "matrix": None,
-            "seed": 300000 + index, "fixed_J": None, "mcse": 0.05,
-            "batch": 50, "B": 50,
-        }
-        cells.append(dict(cell_id=f"D_{index - 1083:04d}", module="D",
-                          factors=factors, config=config))
-        index += 1
-
-    assert len(cells) == 1299, len(cells)
-    assert sum(c["module"] == "A" for c in cells) == 840
-    assert sum(c["module"] == "C" for c in cells) == 243
-    assert sum(c["module"] == "D" for c in cells) == 216
-    return cells
-
-
-ACD_GRID = make_acd_grid()
-print("Module A/C/D cells:", {m: sum(c["module"] == m for c in ACD_GRID) for m in "ACD"})
-'''
-
-
-def _module_b_grid_code() -> str:
-    return r'''
-def make_module_b_grid():
-    cells = []
-    index = 0
-    for K, correction, rho, family, theta, design in itertools.product(
-        [1, 3, 6],
-        ["none", "bonferroni", "holm", "bh", "romano_wolf"],
-        [-0.3, 0.0, 0.3, 0.6, 0.9],
-        ["normal", "empirical"],
-        [0.0, DELTA],
-        ["D3", "D4"],
-    ):
-        alpha_plan, alpha_note = multiplicity.planning_alpha(
-            correction, K, alpha=ALPHA, r=1
-        )
-        factors = dict(module_cell="B", family=family, rho=rho,
-                       theta_mult=round(theta / DELTA, 3), design=design,
-                       J0=50, B=999, K=K, correction=correction,
-                       alpha_plan=alpha_plan, alpha_note=alpha_note)
-        config = {
-            "design": design, "family": family, "rho": rho,
-            "sigma_a": 1.0, "sigma_b": 1.0, "theta": theta,
-            "sigma_D": None, "R": 2000, "J0": 50, "Jmax": JMAX,
-            "alpha": ALPHA, "alpha_adj": alpha_plan, "mode": 1,
-            "delta": DELTA, "power_target": 0.80, "gamma": 0.20,
-            "correction": correction, "K": K,
-            "matrix": EMPIRICAL_MATRIX if family == "empirical" else None,
-            "seed": 400000 + index, "fixed_J": None, "mcse": 0.05,
-            "batch": 50, "B": 999,
-        }
-        cells.append(dict(cell_id=f"B_{index:04d}", module="B",
-                          factors=factors, config=config))
-        index += 1
-    assert len(cells) == 600, len(cells)
-    return cells
-
-
-MODULE_B_GRID = make_module_b_grid()
-print("Module B total cells:", len(MODULE_B_GRID))
+for _m, _n in e1_grid.EXPECTED.items():
+    _got = sum(c["module"] == _m for c in FULL_GRID)
+    assert _got == _n, f"module {_m}: {_got} cells, expected {_n}"
+print("cells per module:", {m: sum(c["module"] == m for c in FULL_GRID)
+                            for m in "ABCD"})
+print("A/C/D:", len(ACD_GRID), " B:", len(MODULE_B_GRID))
 '''
 
 
 def _notebook_acd() -> dict:
+    a, c, d = (e1_grid.EXPECTED[m] for m in "ACD")
     cells: list[dict] = []
-    _md(cells, """
+    _md(cells, f"""
         # E1 Modules A/C/D: operating characteristics, tuning, and variance ratio
 
         This is the combined Phase-3 runner specified in `REVISION_PLAN.md` P3-T2.
-        It executes Module A (840 cells), Module C (243 cells), and Module D
-        (216 cells), for 1,299 cells total. Each cell uses 5,000 outer repetitions,
-        is checkpointed under `/content`, and is intended to run to completion in
-        one Colab session. The empirical family is derived automatically from the
-        committed 500 x 20 `legacy/Paper_Experiments/DGP1_500_results.csv`, using
-        the pre-specified `mvbcf_pehe1` versus `bcf_pehe1` pair.
+        It executes Module A ({a} cells), Module C ({c} cells), and Module D
+        ({d} cells), for {ACD_TOTAL:,} cells total. Each cell uses 5,000 outer
+        repetitions, is checkpointed under `/content`, and is intended to run to
+        completion in one Colab session. The empirical families are derived
+        automatically from the committed 500 x 20
+        `legacy/Paper_Experiments/DGP1_500_results.csv`, using the pre-specified
+        `mvbcf_pehe1` versus `bcf_pehe1` pair.
     """)
     _code(cells, COMMON_SETUP)
     _md(cells, """
-        ## Define the three grids
+        ## Load the canonical grid
 
-        Module A spans all seven families, five correlations, four effect levels,
-        and six designs. Module C varies pilot size, checkpoint batch, family,
-        correlation, and the three adaptive/two-stage designs at the planning
-        alternative. Module D varies the marginal variance ratio, family,
-        correlation, effect, and design.
+        The cells are **imported** from `tisca/python/tisca/outermc/e1_grid.py`,
+        not restated here, so this notebook and the local runner
+        `experiments/E1_operating_characteristics/run_e1_grid.py` cannot drift
+        apart. Module A spans the six parametric families plus the two empirical
+        variants, five correlations, four effect levels, and six designs. Module C
+        varies pilot size, checkpoint batch, family, correlation, and the three
+        adaptive/two-stage designs at the planning alternative. Module D varies the
+        marginal variance ratio, family, correlation, effect, and design.
     """)
-    _code(cells, _acd_grid_code())
+    _code(cells, GRID_CODE)
     _code(cells, """
         OUTPUT_FILE, RESULTS = run_grid(ACD_GRID, "E1_modA_C_D_results.csv")
         print(RESULTS.groupby("module").size())
@@ -395,8 +271,8 @@ def _notebook_acd() -> dict:
         deliberately separate because its bootstrap-heavy correction grid is
         split into two notebooks.
     """)
-    _code(cells, """
-        assert len(RESULTS) == 1299
+    _code(cells, f"""
+        assert len(RESULTS) == {ACD_TOTAL}, len(RESULTS)
         assert RESULTS["cell_id"].is_unique
         d6 = RESULTS[(RESULTS["module"] == "A") & (RESULTS["design"] == "D6") &
                      (RESULTS["family"] == "normal")]
@@ -408,39 +284,41 @@ def _notebook_acd() -> dict:
 
 
 def _notebook_b(shard: int) -> dict:
+    start, end = B_SHARD_BOUNDS[shard]
+    size = end - start
     cells: list[dict] = []
     _md(cells, f"""
         # E1 Module B, shard {shard} of 2: multiplicity
 
-        This notebook runs Module B from P3-T2. The full factorial contains 600
-        cells: K(3) x correction(5) x rho(5) x family(2) x theta(2) x design(2).
-        Shard {shard} runs exactly 300 cells, uses 2,000 outer repetitions, and
+        This notebook runs Module B from P3-T2. The full factorial contains
+        {_B_TOTAL} cells: K(3) x correction(5) x rho(5) x family(2) x theta(2) x
+        design(2), plus the row-bootstrap empirical family, whose dependence is
+        fixed by its own data and which therefore carries no `rho` factor.
+        Shard {shard} runs exactly {size} cells, uses 2,000 outer repetitions, and
         uses B=999 as the bootstrap budget recorded with every row. The scalar
         P2-T3 harness receives the correction-specific planning level from
         `tisca.multiplicity.planning_alpha`, including the Romano-Wolf schedule.
         Results are checkpointed under `/content` one cell at a time. This notebook
         assumes the session completes; a runtime failure loses the local checkpoint.
 
-        The empirical family is derived automatically from the committed 500 x 20
-        `legacy/Paper_Experiments/DGP1_500_results.csv`, using the pre-specified
-        `mvbcf_pehe1` versus `bcf_pehe1` pair.
+        The empirical families are derived automatically from the committed
+        500 x 20 `legacy/Paper_Experiments/DGP1_500_results.csv`, using the
+        pre-specified `mvbcf_pehe1` versus `bcf_pehe1` pair.
     """)
     _code(cells, COMMON_SETUP)
-    _code(cells, _module_b_grid_code())
-    start = 0 if shard == 1 else 300
-    end = 300 if shard == 1 else 600
+    _code(cells, GRID_CODE)
     _code(cells, f"""
         SHARD = {shard}
         START, END = {start}, {end}
         SHARD_GRID = MODULE_B_GRID[START:END]
-        assert len(SHARD_GRID) == 300
+        assert len(SHARD_GRID) == {size}, len(SHARD_GRID)
         assert SHARD_GRID[0]["cell_id"] == f"B_{{START:04d}}"
         assert SHARD_GRID[-1]["cell_id"] == f"B_{{END - 1:04d}}"
         print("Module B shard", SHARD, "cells:", len(SHARD_GRID))
     """)
     _code(cells, f"""
         OUTPUT_FILE, RESULTS = run_grid(SHARD_GRID, "E1_modB_shard{shard}_results.csv")
-        assert len(RESULTS) == 300
+        assert len(RESULTS) == {size}, len(RESULTS)
         assert RESULTS["cell_id"].is_unique
         print("[PASS] Module B shard {shard} complete")
         download_fallback(OUTPUT_FILE)

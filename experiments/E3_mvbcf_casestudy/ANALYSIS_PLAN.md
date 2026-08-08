@@ -21,6 +21,18 @@ after their column means were inspected. It is logged here, in `CALIBRATION.md`,
 must be disclosed in the response letter.** It changes only how `J*` is *computed*;
 it changes no hypothesis, no metric, no family, no correction and no margin.
 
+**Implemented in code, and no cell is re-run.** The amendment is a partition of rows
+that already exist, not a new data-generation instruction, so `run_cell.R` is
+unchanged: it remains the generator that produced seeds `0…999` per cell from cell
+master 1. The split is applied at analysis time by
+`collect_shards.py --pilot-size 100`, which writes
+`results/E3/DGP{d}_n{n}_amended_pilot_replications.csv` and
+`…_amended_confirmatory_replications.csv` and labels every row with an
+`analysis_phase` column alongside the generator's own `seq_phase`; the reanalysis
+itself is `analyse_e3.py`. The four Round-0 rows in `shard_table.csv` now carry
+`status = superseded`, so the collector no longer requires the reserved master-2
+pilot files that item 1 below rules out.
+
 **What changed, and why.**
 
 1. **The dedicated pilot seed block was not run for three of the four cells.** §5 as

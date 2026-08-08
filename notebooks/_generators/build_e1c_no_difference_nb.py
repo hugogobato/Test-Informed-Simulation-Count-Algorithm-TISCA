@@ -152,7 +152,9 @@ print(approach.to_string(index=False))
 # At rho = 1 exactly with matched marginals, sigma_D is identically 0 and BOTH
 # targets are vacuous: any J attains any precision, because the contrast has no
 # sampling variability at all. Report what the implementation actually does here
-# rather than what it ought to do -- the gap between the two is the finding.
+# rather than what it ought to do. Both edges are now closed (F9), so these lines
+# document the CURRENT behaviour: J = 2 rather than 1, and a flagged degenerate cell
+# rather than a blanket marginal_power of 1.0.
 print("required_J_mcse(sigma=0)   ->", planning.required_J_mcse(0.0, target_mcse=0.05))
 print("required_J_power(sigma=0)  ->",
       planning.required_J_power(mode="M1", delta=0.5, sigma=0.0, alpha=ALPHA,
@@ -187,23 +189,39 @@ record("v1 would have run to the budget cap",
        J_v1_const > 1000,
        f"v1 stopped at J = {J_v1_const} with power pinned at 0 by the sd > 0 guard")
 
-# Two rough edges that the degenerate case exposes and that this notebook does NOT
-# paper over. Neither stops the procedure, both are misleading to a user whose two
-# metric columns are identical by accident (a duplicated column name, say):
-record("planner signals the degenerate input rather than returning a number",
-       False,
-       f"required_J_mcse(0) returns {planning.required_J_mcse(0.0, target_mcse=0.05)} "
-       "instead of refusing; recommend a ValidationError in both the R and Python ports")
+# The two rough edges this notebook used to record as open recommendations (F9).
+# Both are now implemented in the Python port, so they are asserted rather than
+# reported as gaps. They mattered to a user whose two metric columns are identical
+# by accident -- a duplicated column name, say -- because the old behaviour answered
+# with a plan no test could run on, and a power of 1.0 for a comparison in which
+# nothing is detectable.
+record("precision layer returns a testable J on a degenerate contrast",
+       planning.required_J_mcse(0.0, target_mcse=0.05) >= 2,
+       f"required_J_mcse(0) returns {planning.required_J_mcse(0.0, target_mcse=0.05)}; "
+       "J = 1 leaves df = 0, so the paired t the plan rests on does not exist")
 record("two-stage result flags a zero-variance contrast",
-       False,
-       f"marginal_power is reported as {res_v2['marginal_power']} for a contrast that "
-       "is identically zero; recommend a `degenerate_contrasts` field in the result dict")
+       res_v2.get("degenerate_contrasts") == [c.get("name", "contrast")
+                                              for c in contrasts],
+       f"degenerate_contrasts = {res_v2.get('degenerate_contrasts')}, "
+       f"marginal_power = {res_v2['marginal_power']} (no longer a blanket 1.0)")
+# Note what marginal_power = 1.0 does and does not mean here. It is the PLANNED
+# power at the declared alternative delta = 0.5, and with sigma = 0 that alternative
+# would indeed be detected with certainty -- so 1.0 is correct arithmetic, and the
+# fix is that the cell is now flagged as degenerate alongside it. The actual F9
+# defect was that 1.0 came back for EVERY delta, including delta = 0, where the
+# statistic is 0/0 and nothing is detectable at all. That is what is asserted:
+record("zero-variance power at a null alternative is not reported as certainty",
+       planning.power_M1(2, 0.0, 0.0, ALPHA) < 1.0,
+       f"power_M1(J=2, delta=0, sigma=0) = {planning.power_M1(2, 0.0, 0.0, ALPHA)}, "
+       f"not 1.0; at the declared delta = {contrasts[0].get('delta')} it correctly "
+       f"remains {float(np.asarray(res_v2['marginal_power']).ravel()[0])}")
 
 report = pd.DataFrame(checks)
 print(report.to_string(index=False))
 print()
-print("FAILING checks are recommendations for the software, not blockers for the "
-      "experiment: the procedure terminates correctly in every case above.")
+assert report["pass"].all(), report[~report["pass"]].to_string(index=False)
+print("All checks pass: the procedure terminates correctly, refuses to claim "
+      "certainty about an undetectable contrast, and names the degenerate cell.")
 
 os.makedirs(os.path.join(RESULTS, "E1c"), exist_ok=True)
 case1.to_csv(os.path.join(RESULTS, "E1c", "null_case_by_design.csv"))

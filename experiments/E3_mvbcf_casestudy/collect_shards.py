@@ -1,15 +1,35 @@
 #!/usr/bin/env python3
-"""Collect E3 Drive checkpoints and enforce the shard-table contract.
+"""Collect E3 shard checkpoints and apply the AMENDMENT 1 pilot/confirmatory split.
 
 Usage, after copying the per-shard CSVs from the participating Google Drives
-into one local directory::
+into one local directory (``notebooks/E3_shards`` already holds them here)::
 
-    python collect_shards.py --drive-dir /path/to/E3_drive_exports
+    python collect_shards.py --drive-dir notebooks/E3_shards
 
-The script writes one file per DGP, n, and mode, plus a combined pilot plus
-confirmatory file per DGP/n cell, under ``results/E3``.  It fails before writing
-outputs if a checkpoint is incomplete, duplicated, assigned to the wrong cell,
-or inconsistent with ``shard_table.csv``.
+It fails before writing outputs if a checkpoint is incomplete, duplicated,
+assigned to the wrong cell, or inconsistent with ``shard_table.csv``.
+
+**The seed blocks this script assembles are not the ones it splits on.**
+``run_cell.R`` is a data *generator*: under ``--mode confirmatory`` it draws from
+L'Ecuyer master 1 and labels the rows ``0..999``, and under ``--mode pilot`` from
+master 2, labelled ``1_000_001..``. That machinery is unchanged and correct, and
+nothing here re-runs it.
+
+What ``ANALYSIS_PLAN.md`` AMENDMENT 1 changed is purely a *partition of rows
+already collected*: seeds ``0..J0-1`` become the pilot that sizes ``J``, and
+seeds ``J0..999`` the confirmatory set that is tested. The two blocks are drawn
+from disjoint L'Ecuyer substreams of the same master, so they are independent
+samples, which is the only property Algorithm 1 requires of a pilot. The
+reserved master-2 block is therefore *not used*: it exists for one cell only and
+was produced by a superseded ``run_cell.R`` (see ``CALIBRATION.md`` D1), and its
+shard-table rows now carry ``status = superseded`` so this script neither reads
+nor requires them.
+
+Outputs under ``results/E3``:
+
+    DGP{d}_n{n}_replications.csv               all 1000 rows, phase-labelled
+    DGP{d}_n{n}_amended_pilot_replications.csv seeds 0..J0-1  (sizes J, then discarded)
+    DGP{d}_n{n}_amended_confirmatory_replications.csv seeds J0..999 (tested)
 """
 
 from __future__ import annotations
@@ -55,6 +75,10 @@ def main():
                         default=here / "shard_table.csv")
     parser.add_argument("--results-dir", type=Path,
                         default=repo / "results" / "E3")
+    parser.add_argument("--pilot-size", type=int, default=100,
+                        help="J0: how many of the confirmatory seeds form the "
+                             "amended pilot (ANALYSIS_PLAN.md AMENDMENT 1 declares "
+                             "100; 50 and 25 are the pre-declared sensitivity rows)")
     args = parser.parse_args()
 
     table_fields, manifest = read_csv(args.table)
@@ -63,6 +87,15 @@ def main():
     missing_fields = required - set(table_fields)
     if missing_fields:
         raise RuntimeError(f"shard table missing columns: {sorted(missing_fields)}")
+
+    # Superseded rows are skipped outright: their files are absent for three of the
+    # four cells and invalid for the fourth, and demanding them made this script
+    # unrunnable after AMENDMENT 1. A table without a `status` column is treated as
+    # all-active so older checkouts keep working.
+    skipped = [s for s in manifest if s.get("status") == "superseded"]
+    manifest = [s for s in manifest if s.get("status") != "superseded"]
+    for spec in skipped:
+        print(f"skip (superseded): {spec['output_filename']}")
 
     by_cell = defaultdict(list)
     loaded = {}
@@ -126,21 +159,49 @@ def main():
         failures = sum(row.get("converged_flag") == "0" for row in rows)
         print(f"{key}: {len(rows)} rows, converged_flag failures={failures}, wrote {output}")
 
-    # Combined cell files are convenient for downstream analysis.  The pilot
-    # rows remain explicitly labelled and retain their disjoint emitted seeds.
+    # AMENDMENT 1: partition the collected confirmatory block into the pilot that
+    # sizes J and the confirmatory set that is tested. This is a row split of data
+    # already in hand -- no cell is re-run -- and it is the step the plan calls the
+    # "reanalysis".
+    J0 = int(args.pilot_size)
+    if J0 < 2:
+        raise RuntimeError("--pilot-size must be at least 2 (a pilot sd needs df >= 1)")
     for dgp, n in sorted(all_fields):
         combined = []
         fields = all_fields[(dgp, n)]
         for mode in ("pilot", "confirmatory"):
             combined.extend(by_cell.get((dgp, n, mode), []))
         combined.sort(key=lambda row: int(row["seed"]))
-        output = args.results_dir / f"DGP{dgp}_n{n}_replications.csv"
-        write_rows(output, fields, combined)
-        failures = sum(row.get("converged_flag") == "0" for row in combined)
-        print(f"(combined) DGP{dgp} n={n}: {len(combined)} rows, "
-              f"converged_flag failures={failures}, wrote {output}")
+        if not combined:
+            raise RuntimeError(f"no rows collected for DGP{dgp} n={n}")
 
-    print("E3 shard collection: PASS")
+        # `seq_phase` records how run_cell.R generated the row; `analysis_phase`
+        # records how AMENDMENT 1 uses it. Keeping both is what makes the deviation
+        # auditable from the data files alone.
+        amended_fields = fields + ["analysis_phase"]
+        pilot, conf = [], []
+        for row in combined:
+            seed = int(row["seed"])
+            target = pilot if seed < J0 else conf
+            row = dict(row, analysis_phase="pilot" if seed < J0 else "confirmatory")
+            target.append(row)
+        if len(pilot) != J0:
+            raise RuntimeError(
+                f"DGP{dgp} n={n}: amended pilot has {len(pilot)} rows, expected {J0}; "
+                f"seeds 0..{J0 - 1} are not all present")
+
+        for tag, rows_out in (("", pilot + conf),
+                              ("amended_pilot_", pilot),
+                              ("amended_confirmatory_", conf)):
+            output = args.results_dir / f"DGP{dgp}_n{n}_{tag}replications.csv"
+            write_rows(output, amended_fields, rows_out)
+        failures = sum(row.get("converged_flag") == "0" for row in combined)
+        print(f"(combined) DGP{dgp} n={n}: {len(combined)} rows "
+              f"-> pilot {len(pilot)} (seeds 0..{J0 - 1}) + confirmatory {len(conf)} "
+              f"(seeds {J0}..{max(int(r['seed']) for r in conf)}), "
+              f"converged_flag failures={failures}")
+
+    print(f"E3 shard collection: PASS (J0 = {J0}, pilot rows discarded from inference)")
 
 
 if __name__ == "__main__":

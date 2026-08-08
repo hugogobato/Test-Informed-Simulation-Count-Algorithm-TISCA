@@ -387,9 +387,30 @@ def build():
     md(cells, """
         ## The rule that replaces "J > 30"
 
-        `J_min` is the smallest grid value from which the level stays within 2 MCSE
-        of nominal for **every** larger J, so a single lucky crossing does not
-        qualify. The Berry-Esseen column is the J at which the classical bound on
+        `J_min` is the smallest grid value from which the level stays inside the
+        equivalence band for **every** larger J, so a single lucky crossing does not
+        qualify.
+
+        The band is `max(0.005, 2 x MCSE)`, which is **not** the same as the 2-MCSE
+        criterion and should not be described as one: it is a 2-MCSE rule with a
+        practical floor of +/-0.005 (a level in 0.045-0.055) underneath it. Which
+        term is active is decided entirely by the outer budget of each sweep, and in
+        this grid the split is total rather than mixed:
+
+        * the **paired-t sweep** runs at `R = 40,000`, so `2 x MCSE` is 0.0018-0.0028
+          and the +/-0.005 floor binds in **every** row. The headline `J_min` values
+          are therefore floor-determined, and a bare 2-MCSE rule would have declared
+          the bivariate *normal* contrast -- where the paired t is exact at every J --
+          to "need J = 150", by flagging ordinary Monte Carlo wobble as
+          miscalibration;
+        * the **studentized-bootstrap sweep** runs at `R = 2,500`, so `2 x MCSE` is
+          0.0082-0.0128 and the MCSE term binds in **every** row; the floor never
+          activates there.
+
+        This is the same equivalence-band logic the manuscript adopts for coverage in
+        change C6, applied to its own operating characteristics.
+
+        The Berry-Esseen column is the J at which the classical bound on
         the normal approximation of the standardised mean falls below 0.005. It is
         an upper bound for a different statistic (it does not cover studentization)
         and it is loose here; it is tabulated to show that the requirement scales

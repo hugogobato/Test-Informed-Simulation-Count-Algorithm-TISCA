@@ -65,6 +65,15 @@ def load_rows(path):
 
 
 def parse_bibtex_fields(bibtex):
+    # Both the entry-type and the cite-key patterns are anchored with `re.match`, so
+    # a single leading newline in the spreadsheet cell silently emptied BOTH: rows 33
+    # and 82 (`@InProceedings{pmlr-v202-wu23i}` and `{pmlr-v151-xu22c}`) came through
+    # with no entry type and the fallback `row_NN` id, which then denied them the
+    # `inproceedings` branch in `classify_venues.py` and left two PMLR proceedings
+    # coded `hybrid/subscription`. The stored `bibtex` column was already stripped,
+    # so the CSV looked correct and the defect was invisible downstream.
+    bibtex = (bibtex or "").strip()
+
     def field(name):
         m = re.search(
             name + r"\s*=\s*(?:\{([^{}]*)\}|([\"`'][^\"`']*[\"`']|[A-Za-z0-9_.\-]+))",
@@ -127,9 +136,17 @@ def classify(entry, venue_types=None):
         # The DOAJ-backed table supersedes the entry-type heuristic wherever it has
         # a verdict: it also corrects proceedings published under an @article entry
         # type (AAAI) and separates book chapters from conference papers.
+        #
+        # `working-paper` is NOT asserted either way. An entry with no venue may be
+        # an unrefereed series item (NBER t0283) or a refereed article whose BibTeX
+        # simply lost its journal field (sloczynski2022doubly), and the mechanical
+        # record cannot tell them apart. Inferring "Y" put an unrefereed NBER
+        # technical working paper into the peer-reviewed count.
+        peer = {"preprint": "N", "working-paper": "REVIEW_REQUIRED"}.get(
+            hit["publisher_type"], "Y")
         return {"publisher_type": hit["publisher_type"],
                 "publisher_family": hit["publisher_family"],
-                "peer_reviewed": "N" if hit["publisher_type"] == "preprint" else "Y",
+                "peer_reviewed": peer,
                 "publisher_type_source": hit["source"],
                 "doaj_listed": hit["doaj_listed"]}
     if et == "misc":

@@ -34,6 +34,28 @@ replication, including its `replication_seconds`, to a CSV under
 `/content/TISCA_E3`; the final cell includes the `google.colab.files.download`
 fallback.
 
+## Status: execution is complete; the Round 0 pilots are superseded
+
+All four cells (DGP1/2/3 at n = 500, DGP1 at n = 100) hold a complete
+1000-replication confirmatory block with zero `converged_flag` failures. **Nothing
+below needs to be run again.** The run order is kept as the record of how the data
+was produced.
+
+The Round 0 pilot notebooks in particular are **superseded** and must not be used
+for planning: a pilot on the reserved seed block exists for one cell only, and it
+was produced by an earlier `run_cell.R` whose BCF branch was later rewritten (see
+`experiments/E3_mvbcf_casestudy/CALIBRATION.md` deviation D1). `shard_table.csv`
+marks those four rows `status = superseded`, and `collect_shards.py` skips them.
+
+Under `ANALYSIS_PLAN.md` AMENDMENT 1 the pilot is instead the first `J0 = 100`
+seeds of the confirmatory block, and seeds `100..999` are the confirmatory set.
+That is a split of rows already collected, applied at analysis time:
+
+```bash
+python experiments/E3_mvbcf_casestudy/collect_shards.py --drive-dir notebooks/E3_shards
+python experiments/E3_mvbcf_casestudy/analyse_e3.py
+```
+
 ## Run order
 
 1. Upload and run `E3_DGP1_n500_pilot_shard01_seeds1000001-1000050.ipynb`

@@ -341,3 +341,99 @@ def test_empirical_families_recover_nominal_type_I_under_the_oracle():
         s, _, _ = engine.run_e1(c)
         assert abs(s["reject_rate"] - 0.05) <= 4 * mcse, (fam, s["reject_rate"])
         assert abs(s["ci_cover"] - 0.95) <= 4 * mcse, (fam, s["ci_cover"])
+
+
+def test_oracle_sigma_is_exact_not_sampled():
+    """The D6 oracle must be a derived constant, not a Monte Carlo estimate.
+
+    The 1e6-draw estimator it replaced claimed 0.07% accuracy from
+    ``sigma/sqrt(2n)``, which presumes a finite fourth moment. ``t3`` has none
+    (Student-t with 3 df has finite moments only of order < 3), so no CLT applies
+    to its sample sd; measured against the closed form the estimate was off by up
+    to 1.4%. These assertions pin the derivations themselves.
+    """
+    from tisca.outermc import sigma_d
+
+    # normal: textbook closed form
+    assert sigma_d.sigma_D_exact("normal", 0.6) == pytest.approx(np.sqrt(0.8), rel=1e-12)
+    # mix: normal pair plus an independent 2% symmetric Exp(10) component whose
+    # second moment is exactly 0.02 * 2 * 10^2 = 4
+    assert sigma_d.sigma_D_exact("mix", 0.0) == pytest.approx(np.sqrt(6.0), rel=1e-12)
+    assert sigma_d.sigma_D_exact("mix", 0.9) == pytest.approx(np.sqrt(4.2), rel=1e-12)
+    # lognormal c_f has a closed form: E[e^{Z/2} Z] / sd = 0.5 e^{1/8} / sd
+    sd_ln = np.sqrt((np.exp(0.25) - 1) * np.exp(0.25))
+    assert sigma_d.family_c("lognormal") == pytest.approx(0.5 * np.exp(0.125) / sd_ln,
+                                                          rel=1e-10)
+    # a_1 of the Mehler expansion must equal c_f: two independent routes agreeing
+    for fam in ("lognormal", "gamma", "beta", "t3"):
+        a1 = sigma_d._mehler_coeffs(fam)[0]
+        assert a1 == pytest.approx(sigma_d.family_c(fam), rel=1e-7), fam
+    # determinism: no seed anywhere
+    assert (sigma_d.sigma_D_exact("t3", 0.9) == sigma_d.sigma_D_exact("t3", 0.9))
+
+
+def test_oracle_sigma_beats_the_million_draw_estimate_on_t3():
+    """t3 is where the sampled oracle failed. Pin both halves of that claim.
+
+    Half one: a 1e6-draw sample sd disagrees with the closed form by far more than
+    the 0.07% that estimator advertised, so the sampled version cannot quietly come
+    back and still pass.
+
+    Half two: the closed form is the one that is right. That is established
+    WITHOUT Monte Carlo, by recomputing ``c_f`` under a different quadrature rule
+    -- fixed-order Gauss-Legendre after a tanh substitution, which places its nodes
+    completely differently from the adaptive Gauss-Kronrod rule used in
+    ``family_c`` and handles the endpoint singularities by a different mechanism.
+    Two independent deterministic rules agreeing to 1e-9 settles it. A Monte Carlo
+    cross-check cannot: the sample variance of a t3 contrast has infinite variance,
+    so replicate averages converge too slowly to adjudicate anything at this scale
+    -- which is precisely the defect being fixed.
+    """
+    from scipy import stats as _st
+
+    from tisca.outermc import families, sigma_d
+
+    exact = sigma_d.sigma_D_exact("t3", 0.9)
+    b = families.sample_batch("t3", 1, 1_000_000, rho=0.9, theta=0.0,
+                              master_seed=20260806)
+    sampled = float(np.std(b[0, :, 0] - b[0, :, 1], ddof=1))
+    assert abs(sampled - exact) / exact > 0.005, (exact, sampled)
+
+    # Independent rule: u = (1 + tanh(t))/2 maps (-inf, inf) -> (0, 1), and the
+    # Jacobian 1/(2 cosh^2 t) kills the endpoint singularities geometrically.
+    for family in ("t3", "lognormal", "gamma", "beta"):
+        mu, sd = families._MOMENTS[family]
+        t, w = np.polynomial.legendre.leggauss(4000)
+        t = t * 30.0                       # a wide finite window; the rest underflows
+        w = w * 30.0
+        u = 0.5 * (1.0 + np.tanh(t))
+        jac = 0.5 / np.cosh(t) ** 2
+        z = _st.norm.ppf(u)
+        vals = families._family_marginal(family, u, z) * z * jac
+        vals = np.where(np.isfinite(vals), vals, 0.0)
+        alt = float(np.dot(w, vals)) / sd
+        assert alt == pytest.approx(sigma_d.family_c(family), abs=1e-9), (
+            family, alt, sigma_d.family_c(family))
+
+
+def test_empirical_family_accepts_its_own_default_rho():
+    """sample_batch('empirical', matrix=...) must work without naming rho.
+
+    ``rho`` defaulted to 0.0, so the row bootstrap raised on its own default and
+    every call site had to spell out ``rho=None``. Three states are now distinct:
+    unnamed, explicit None, and an explicit number.
+    """
+    from tisca.outermc import families
+
+    mat = _synthetic_loss_matrix()
+    a = families.sample_batch("empirical", 1, 500, matrix=mat, master_seed=9)
+    b = families.sample_batch("empirical", 1, 500, rho=None, matrix=mat, master_seed=9)
+    assert np.array_equal(a, b)
+    # an explicit numeric rho is still refused
+    with pytest.raises(ValueError, match="row bootstrap"):
+        families.sample_batch("empirical", 1, 10, rho=0.3, matrix=mat, master_seed=0)
+    # and the copula families still default to independence
+    assert np.array_equal(
+        families.sample_batch("normal", 1, 500, master_seed=4),
+        families.sample_batch("normal", 1, 500, rho=0.0, master_seed=4),
+    )

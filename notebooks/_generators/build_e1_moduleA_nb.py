@@ -13,6 +13,16 @@ GitHub repo), runs the acceptance gate once, then sweeps the grid with a progres
 bar, appending to `E1_moduleA_results.csv` so an interrupted session loses at most
 one cell.
 
+**SUPERSEDED — do not run to produce results.** This is the earlier standalone
+Module-A runner, kept for provenance only; its output notebook is no longer in
+`notebooks/`. It carries its own copy of a 840-cell grid that predates the split of
+the empirical family into the row-bootstrap and copula variants, so it does not
+match `tisca/python/tisca/outermc/e1_grid.py`, which is now the single source of
+truth. (It does not hit the numeric-rho failure, because it omits the empirical
+families altogether — see the `families` list below.) Use `build_e1_modules_nb.py`
+for the Colab runners and `experiments/E1_operating_characteristics/run_e1_grid.py`
+locally; both import the canonical grid.
+
 Regenerate: python notebooks/_generators/build_e1_moduleA_nb.py
 """
 import json, textwrap

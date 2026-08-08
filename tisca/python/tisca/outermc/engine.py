@@ -20,6 +20,7 @@ import numpy as np
 from scipy import stats
 
 from . import families as _fam
+from . import sigma_d as _sigma_d
 from .designs import make_design, paired_pvalue
 
 DEFAULT_CONFIG = {
@@ -60,16 +61,14 @@ def _merge(cfg):
 
 
 _SIGMA_D_CACHE = {}
-_SIGMA_D_N = 1_000_000        # MCSE of the sd estimate ~ sigma/sqrt(2n) = 0.07%
-_SIGMA_D_SEED = 20260806      # fixed, so the oracle is a constant of the harness
 
 
 def sigma_D_true(cfg):
     """True paired-difference sd of the configured family. D6 plans from this.
 
-    Closed form for the bivariate normal, where ``sigma_D = sqrt(sigma_a^2 +
-    sigma_b^2 - 2 rho sigma_a sigma_b)`` is exact. **That formula is not valid for
-    the other six families** and using it everywhere is what made D6 a non-oracle:
+    The bivariate-normal closed form ``sqrt(sigma_a^2 + sigma_b^2 - 2 rho sigma_a
+    sigma_b)`` was originally applied to every family, which is what made D6 a
+    non-oracle:
 
       * ``mix`` adds a 2% catastrophic component to method B, so its true sigma_D
         is 1.6x to 4.6x the formula (the formula is 37-78% too small);
@@ -79,23 +78,30 @@ def sigma_D_true(cfg):
 
     An oracle that plans from a sigma 20-78% below the truth under-sizes J, so the
     "true sigma known" reference design was reporting optimistic power and E[J]
-    exactly where the non-normal families were supposed to stress it. For every
-    non-normal family sigma_D is therefore estimated once, to 0.07% MCSE, from a
-    dedicated large draw at a fixed seed, and cached: it is a deterministic
-    constant of the family/rho/scale cell, independent of ``theta``.
+    exactly where the non-normal families were supposed to stress it.
+
+    The first repair replaced the formula with a one-million-draw sample sd. That
+    removed the bias but left D6 planning from a *random* quantity, under an
+    accuracy claim (``sigma/sqrt(2n) = 0.07%``) that presumes a finite fourth
+    moment. Family ``t3`` has none -- Student-t with 3 df has finite moments only
+    of order < 3 -- so no central limit theorem applies to its sample sd, and the
+    1e6-draw value was measurably off by up to 1.4% against the closed form.
+
+    ``sigma_d.sigma_D_exact`` now derives every family exactly (closed form,
+    one-dimensional quadrature, or a Mehler expansion with a *computed* truncation
+    bound), so this is a deterministic constant of the family/rho/scale cell,
+    independent of ``theta`` and of any seed. See that module for the derivations.
     """
-    a, b = float(cfg["sigma_a"]), float(cfg["sigma_b"])
-    r = None if cfg["rho"] is None else float(cfg["rho"])
     fam = cfg.get("family", "normal")
-    if fam == "normal":
-        return float(np.sqrt(a * a + b * b - 2 * r * a * b))
+    a, b = float(cfg["sigma_a"]), float(cfg["sigma_b"])
+    r = None if cfg.get("rho") is None else float(cfg["rho"])
     mat = cfg.get("matrix")
-    key = (fam, r, a, b, None if mat is None else hash(np.asarray(mat).tobytes()))
+    asym = bool(cfg.get("asym", True))
+    key = (fam, r, a, b, asym,
+           None if mat is None else hash(np.asarray(mat).tobytes()))
     if key not in _SIGMA_D_CACHE:
-        block = _fam.sample_batch(fam, 1, _SIGMA_D_N, rho=r, sigma_a=a, sigma_b=b,
-                                  theta=0.0, matrix=mat, master_seed=_SIGMA_D_SEED)
-        d = block[0, :, 0] - block[0, :, 1]
-        _SIGMA_D_CACHE[key] = float(d.std(ddof=1))
+        _SIGMA_D_CACHE[key] = _sigma_d.sigma_D_exact(
+            fam, r, sigma_a=a, sigma_b=b, matrix=mat, asym=asym)
     return _SIGMA_D_CACHE[key]
 
 

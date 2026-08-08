@@ -11,13 +11,26 @@ Closes the last two open boxes on the E3 case study:
   four-way identity test over ``mc.cores`` in {1, 2} crossed with shard-aligned
   versus shard-offset seed ranges.
 
-**CALIBRATION.md §3.6 asks separately which of `stochtree::bcf`, `dbarts`,
-`bartCause` and `fast_bart()` actually honour an explicit seed. That question is
-answered by the same evidence and needs no extra run**: every metric column is
-namespaced by model (`mvbcf_*`, `bcf_*`, `bart_*`, `mvbart_*`), so if a re-run
-reproduces a model's columns exactly then that model honoured its seed, and if it
-does not, the differing prefixes name the offenders. The notebook reports the
-verdict per model on that basis rather than fitting anything twice by hand.
+**CALIBRATION.md §3.6 — which of `stochtree::bcf`, `dbarts`, `bartCause` and
+`fast_bart()` actually honour an *explicit* seed — is NOT answered here, and the
+argument that it was is wrong.** The claim used to be that per-model column
+prefixes settle it: if a re-run reproduces `bcf_*` exactly then `bcf` honoured its
+seed. It does not follow. `run_cell.R` positions a fixed L'Ecuyer substream in the
+*global* RNG state immediately before each fit, so a model that ignored its seed
+argument entirely and drew from the global stream would reproduce its columns just
+as exactly as one that honoured it. Both hypotheses predict identical output, so
+the test has no power to separate them.
+
+What the prefix comparison does establish is real and worth having: **run-level
+reproducibility per model** — re-running a seed reproduces that model's columns,
+which rules out wall-clock or PID seeding and uncontrolled nondeterminism inside
+each fit. The columns are reported under that name.
+
+The test that would isolate the seed argument is the one CALIBRATION.md actually
+specifies: fit the same model twice on one replication with the **same explicit
+seed** but from **two different global RNG states**. Only agreement there
+attributes the reproducibility to the seed argument. That run does not exist, so
+G2 stays open and the §3.6 box stays unticked.
 
 Regenerate with::
 
@@ -172,15 +185,20 @@ cmp_A = compare_rows(STORED_A[STORED_A["seed"].isin(TEST_A_SEEDS)], rerun_A,
 '''
 
 TEST_A_MODELS = r'''
-# Per-model verdict. This is the answer to CALIBRATION.md section 3.6: a model that
-# honours its seed reproduces all of its columns; one that does not shows up here
-# under its own prefix, with no extra fitting required.
+# Per-model RUN-LEVEL REPRODUCIBILITY. Read this for what it is: a model whose
+# columns come back identical was reproduced by a re-run of the same seed. That is
+# NOT the same as CALIBRATION.md section 3.6's question, which asks whether the model
+# honours its *explicit seed argument*. run_cell.R sets a fixed L'Ecuyer substream in
+# the global RNG state right before each fit, so a model that ignored its seed
+# argument and drew from the global stream would reproduce these columns just as
+# exactly. The two explanations are observationally identical here, so section 3.6
+# is NOT answered by this table -- see the closing note.
 per_model = (cmp_A[cmp_A["model"].isin(["mvbcf", "bcf", "bart", "mvbart"])]
              .groupby("model")
              .agg(columns=("column", "size"),
                   n_differing=("identical", lambda v: int((~v).sum())),
                   max_abs_diff=("max_abs_diff", "max")))
-per_model["honours_seed"] = per_model["n_differing"] == 0
+per_model["reproduces_under_rerun"] = per_model["n_differing"] == 0
 print(per_model.to_string())
 print()
 meta = cmp_A[~cmp_A["model"].isin(["mvbcf", "bcf", "bart", "mvbart"])]
@@ -241,10 +259,10 @@ for k, c in cmp_B.items():
     })
 for m, r in per_model.iterrows():
     checks.append({
-        "check": f"seed honoured by {m}",
+        "check": f"run-level reproducibility of {m}",
         "detail": f"{int(r['n_differing'])} of {int(r['columns'])} columns differ, "
                   f"max |diff| = {r['max_abs_diff']}",
-        "pass": bool(r["honours_seed"]),
+        "pass": bool(r["reproduces_under_rerun"]),
     })
 report = pd.DataFrame(checks)
 print(report.to_string(index=False))
@@ -269,9 +287,13 @@ print(f"""
 - [{'x' if all(c['identical'].all() for c in cmp_B.values()) else ' '}] P0-T2 §3.5
       four-way identity test (mc.cores 1 vs 2, shard-aligned vs shard-offset) on
       DGP{TEST_B_DGP} n={TEST_B_N}, seeds {TEST_B_SEEDS}.
-- [{'x' if bool(per_model['honours_seed'].all()) else ' '}] P0-T2 §3.6 per-model seed
-      honouring, read off the column-level comparison:
-      {dict(per_model['honours_seed'])}.
+- [ ] P0-T2 §3.6 per-model seed HONOURING: **still open**. What this notebook
+      establishes is run-level reproducibility per model:
+      {dict(per_model['reproduces_under_rerun'])}.
+      That does not isolate the explicit seed argument, because run_cell.R
+      deterministically positions the global RNG stream before every fit. The
+      discriminating run -- same model, same explicit seed, two different global
+      RNG states -- has not been done.
 """)
 '''
 
@@ -291,9 +313,12 @@ def build(bundle_source, bundle_sha):
            different worker counts and different shard boundaries.
 
         `CALIBRATION.md` §3.6 also asks which model implementations honour an
-        explicit seed. **That needs no separate experiment**: every metric column is
-        namespaced by model, so a re-run that reproduces a model's columns proves
-        that model honoured its seed, and any offender is named by its prefix.
+        explicit seed. **This notebook does not answer that**, and an earlier
+        version wrongly claimed it did. Re-running a seed reproduces a model's
+        columns whether the model honoured its seed argument or ignored it and drew
+        from the global stream, which `run_cell.R` positions deterministically
+        before every fit. What is reported per model is therefore **run-level
+        reproducibility**, and the §3.6 box stays unticked.
 
         Runtime is about 50 minutes: 3 replications at n = 500 for Test A and 8 at
         n = 100 for Test B. One Colab session, comfortably inside the cap.

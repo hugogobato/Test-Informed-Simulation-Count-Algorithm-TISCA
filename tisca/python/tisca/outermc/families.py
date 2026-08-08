@@ -34,10 +34,35 @@ FAMILIES = {
     "beta": "Beta near the upper boundary, coverage-like (family e)",
     "t3": "bivariate Student-t, 3 df (family f)",
     "empirical": ("row bootstrap of a supplied loss matrix, real joint dependence "
-                  "(family g; rho is fixed by the data, pass rho=None)"),
+                  "(family g; rho is fixed by the data, so omit it or pass None)"),
     "empirical_copula": ("empirical marginals of a supplied loss matrix coupled by "
                          "the design's Gaussian copula (family g', rho is free)"),
 }
+
+
+class _Unset:
+    """Sentinel for "the caller named no ``rho``", which is NOT the same as ``None``.
+
+    ``rho`` used to default to ``0.0``, so ``sample_batch("empirical", matrix=...)``
+    raised on its own default: the row bootstrap refuses an imposed rho (see the
+    family note below), and a defaulted ``0.0`` is indistinguishable from a caller
+    who explicitly asked for independence. Every call site then had to spell out
+    ``rho=None`` or crash. With this sentinel the three states are separate:
+
+      unnamed (``UNSET``)   -> ``0.0`` for the copula families, accepted by the
+                               row bootstrap, which has no rho to set;
+      explicit ``None``     -> "this family's rho is fixed by its data"; still an
+                               error for the copula families, which need a number;
+      explicit number       -> honoured, and still an error for ``empirical``.
+    """
+
+    __slots__ = ()
+
+    def __repr__(self):                                   # pragma: no cover - debug aid
+        return "<rho unset>"
+
+
+UNSET = _Unset()
 
 
 def _gauss_z(rng, size, rho):
@@ -232,15 +257,17 @@ def _family_marginal(family, u, z):
     raise ValueError(f"no marginal registered for family {family!r}")
 
 
-def sample_batch(family, R, J, rho=0.0, sigma_a=1.0, sigma_b=1.0, theta=0.0,
+def sample_batch(family, R, J, rho=UNSET, sigma_a=1.0, sigma_b=1.0, theta=0.0,
                  matrix=None, rng=None, master_seed=None, asym=True):
     """Draw ``(R, J, 2)`` paired losses for one family in one vectorised call.
 
     ``rng`` is a ``numpy.random.Generator``; if omitted a generator is seeded from
     ``master_seed`` (via a SeedSequence) so the block is reproducible and resumable.
-    ``asym`` controls whether a skewed family is applied to method A only (the
-    default, which gives a skewed contrast ``D``) or to both marginals (which
-    makes the pair exchangeable and forces ``skew(D) = 0``); see ``_SKEWED``.
+    ``rho`` defaults to the ``UNSET`` sentinel, which means 0.0 for the copula
+    families and "not applicable" for the ``empirical`` row bootstrap; see
+    ``_Unset``. ``asym`` controls whether a skewed family is applied to method A
+    only (the default, which gives a skewed contrast ``D``) or to both marginals
+    (which makes the pair exchangeable and forces ``skew(D) = 0``); see ``_SKEWED``.
     """
     if rng is None:
         ss = np.random.SeedSequence(master_seed)
@@ -252,13 +279,16 @@ def sample_batch(family, R, J, rho=0.0, sigma_a=1.0, sigma_b=1.0, theta=0.0,
         # exactly. rho cannot be imposed on top of that, so requesting one is an
         # error rather than a silently ignored argument (see the note above).
         mat = _check_matrix(matrix)
-        if rho is not None:
+        if not (rho is None or isinstance(rho, _Unset)):
             raise ValueError(
                 "family 'empirical' is a row bootstrap: it reproduces the loss "
-                "matrix's own dependence and cannot be set to rho=%r. Pass "
-                "rho=None, or use family 'empirical_copula' to control rho." % (rho,))
+                "matrix's own dependence and cannot be set to rho=%r. Omit rho or "
+                "pass rho=None, or use family 'empirical_copula' to control rho."
+                % (rho,))
         idx = rng.integers(0, mat.shape[0], size=(R, J))
         return _empirical_standardise(mat[idx], mat, sigma_a, sigma_b, theta)
+    if isinstance(rho, _Unset):
+        rho = 0.0
     if rho is None:
         raise ValueError(f"family {family!r} requires a numeric rho")
     z = _gauss_z(rng, (R, J), rho)                     # (R, J, 2) z-scores
@@ -293,7 +323,7 @@ def sample_batch(family, R, J, rho=0.0, sigma_a=1.0, sigma_b=1.0, theta=0.0,
     raise ValueError(f"unknown family {family!r}; choose from {sorted(FAMILIES)}")
 
 
-def contrast_skewness(family, rho=0.0, sigma_a=1.0, sigma_b=1.0, asym=True,
+def contrast_skewness(family, rho=UNSET, sigma_a=1.0, sigma_b=1.0, asym=True,
                       n=400_000, seed=0, matrix=None):
     """Standardised third moment of ``D = L_A - L_B`` for a family/rho cell.
 
@@ -311,7 +341,7 @@ def contrast_skewness(family, rho=0.0, sigma_a=1.0, sigma_b=1.0, asym=True,
     return float(np.mean(d ** 3) / s ** 3) if s > 0 else 0.0
 
 
-def sample_pairs(family, n, rho=0.0, sigma_a=1.0, sigma_b=1.0, theta=0.0,
+def sample_pairs(family, n, rho=UNSET, sigma_a=1.0, sigma_b=1.0, theta=0.0,
                  matrix=None, rng=None, seed=None):
     """Compatibility helper: draw ``n`` pairs as a ``(n, 2)`` array."""
     return sample_batch(family, 1, n, rho=rho, sigma_a=sigma_a, sigma_b=sigma_b,
@@ -322,7 +352,7 @@ def sample_pairs(family, n, rho=0.0, sigma_a=1.0, sigma_b=1.0, theta=0.0,
                         master_seed=None)[0]
 
 
-def draw_rep_losses(family, R, J, rho=0.0, sigma_a=1.0, sigma_b=1.0, theta=0.0,
+def draw_rep_losses(family, R, J, rho=UNSET, sigma_a=1.0, sigma_b=1.0, theta=0.0,
                     matrix=None, master_seed=0, asym=True):
     """Vectorised ``(R, J, 2)`` draw seeded via SeedSequence``master_seed``."""
     return sample_batch(family, R, J, rho=rho, sigma_a=sigma_a, sigma_b=sigma_b,

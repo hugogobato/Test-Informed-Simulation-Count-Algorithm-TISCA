@@ -189,6 +189,14 @@ class TwoStageDesign:
         # and the planned J, evaluated in the contrast's own mode -- not the
         # realised rejections (an earlier version returned a vector of 1.0s,
         # which read as "100% power" in the output).
+        #
+        # The `if sigma_ub > 0 else 1.0` short circuit that used to guard this call
+        # reintroduced the same defect for degenerate contrasts: a pilot with zero
+        # observed contrast variance was reported at power 1.0 whatever delta was,
+        # including delta = 0, where nothing is detectable at all. The mode-specific
+        # power functions now handle sigma = 0 themselves, so the call is
+        # unconditional and each degenerate contrast is FLAGGED instead
+        # (spec §8.5 asks for a graceful path *and* for the cell to be reported).
         marginal_power = np.array(
             [
                 _plan.power_function(
@@ -199,11 +207,13 @@ class TwoStageDesign:
                     margin=c.get("margin"),
                     alpha=self.alpha_adj,
                 )
-                if pr["sigma_ub"] > 0 else 1.0
                 for c, pr in zip(self.contrasts, plan_rows)
             ],
             dtype=float,
         )
+        for pr in plan_rows:
+            pr["degenerate"] = bool(pr["sigma_ub"] <= 0.0)
+        degenerate = [pr["name"] for pr in plan_rows if pr["degenerate"]]
         conjunctive = bool(all(rejected)) if self.success_criterion == "conjunctive" else None
         disjunctive = bool(any(rejected)) if self.success_criterion == "disjunctive" else None
 
@@ -220,6 +230,7 @@ class TwoStageDesign:
             "family_rejected_conjunctive": conjunctive,
             "family_rejected_disjunctive": disjunctive,
             "marginal_power": marginal_power,
+            "degenerate_contrasts": degenerate,
             "design": "D4",
             "gamma": self.gamma,
             "success_criterion": self.success_criterion,

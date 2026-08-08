@@ -15,7 +15,8 @@ Resulting `publisher_type`:
     preprint            @misc (arXiv)
     conference          @inproceedings/@incollection, plus proceedings published
                         under an @article entry type (AAAI), fixed here
-    working-paper       NBER/JSTOR-style entries with no journal
+    working-paper       NBER/JSTOR-style entries with neither journal nor
+                        booktitle, whatever entry type the exporter chose
     gold-OA             journal listed in DOAJ, APC charged
     diamond-OA          journal listed in DOAJ, no APC
     hybrid/subscription journal not listed in DOAJ
@@ -173,12 +174,21 @@ def main(argv=None):
         venue, pub, ets = rec["venue"], rec["publisher"], rec["entry_types"]
         if "misc" in ets:
             kind, conf, src = "preprint", "high", "entry type @misc"
+        elif not venue:
+            # Tested BEFORE the book branch. With neither `journal` nor `booktitle`
+            # there is nothing the entry can be a chapter *of*, so the entry type an
+            # exporter happened to choose carries no information about the venue
+            # kind. Abadie & Imbens (2002) is the case that forced this: it is NBER
+            # technical working paper t0283, exported as `@book` with an
+            # `institution` field and no venue, and the old ordering coded it
+            # `book-chapter`. Genuine chapters (nie2021nonparametric, booktitle
+            # "Handbook of Statistical Methods for Precision Medicine") keep a venue
+            # and are unaffected.
+            kind, conf, src = "working-paper", "high", "no journal or booktitle field"
         elif ets & {"incollection", "inbook", "book"}:
             kind, conf, src = "book-chapter", "high", "entry type @incollection/@book"
         elif ets & {"inproceedings"} or key in ENTRY_TYPE_OVERRIDES:
             kind, conf, src = "conference", "high", "entry type / proceedings title"
-        elif not venue:
-            kind, conf, src = "working-paper", "high", "no journal field"
         else:
             hit = cache.get(key)
             if hit is None and not args.offline:

@@ -188,9 +188,17 @@ def test_invalid_mode_and_target_rejected():
 
 
 def test_sigma_zero_branches_for_all_modes():
-    """sigma=0 -> deterministic outcome for every mode (rule 8.5)."""
+    """sigma=0 -> deterministic outcome for every mode (rule 8.5).
+
+    The M1 null case is the one this test previously got wrong. It asserted power
+    1.0 at ``delta = 0, sigma = 0`` -- i.e. that a contrast whose per-replication
+    difference is identically zero is detected with certainty. Nothing is
+    detectable there: the statistic is 0/0 and the test never rejects. M1 now
+    reports ``alpha`` when the planning alternative sits inside the null, which is
+    the convention M2-M4 already used on the lines below.
+    """
     assert P.power_function("M1", 10, 0.5, 0.0, alpha=0.05) == 1.0
-    assert P.power_function("M1", 10, 0.0, 0.0, alpha=0.05) == 1.0
+    assert P.power_function("M1", 10, 0.0, 0.0, alpha=0.05) == pytest.approx(0.05)
     assert P.power_function("M2", 10, -0.5, 0.0, alpha=0.05) == 1.0
     assert P.power_function("M2", 10, 0.5, 0.0, alpha=0.05) == pytest.approx(0.05)
     assert P.power_function("M3", 10, -1.0, 0.0, alpha=0.05, margin=0.5) == 1.0
@@ -255,3 +263,27 @@ def test_solve_J_scan_default_alpha_and_combine_empty():
     j_pw = P.solve_J_scan(2.0, mode="M1", delta=0.5, target_power=0.8)
     assert j_pw >= 2
     assert P.combine_J([]) == 0
+
+
+def test_degenerate_sigma_never_reports_certainty_or_a_testless_J():
+    """F9: the two zero-variance escapes that used to produce nonsense.
+
+    1. ``required_J_mcse(0, m)`` returned 1. One replication satisfies an MCSE
+       target vacuously but leaves ``df = 0``, so the paired t the plan is built
+       on does not exist; the other two solvers already returned 2.
+    2. M1 reported power 1.0 at ``sigma = 0`` for ANY delta, so a contrast with no
+       detectable signal at all was published as fully powered.
+
+    The solver must still terminate at the smallest admissible J (rule 8.5): the
+    honest power is not allowed to send a degenerate cell to J_max.
+    """
+    assert P.required_J_mcse(0.0, 0.01) == 2
+    assert P.required_J_mcse(1e-9, 0.01) == 2          # and never below 2
+    assert P.required_J_halfwidth(0.0, 0.01, 0.05) == 2
+    assert P.required_J_power("M1", 0.0, 0.0, 0.80, 0.05) == 2
+    assert P.required_J_power("M1", 0.5, 0.0, 0.80, 0.05) == 2
+    assert P.solve_J_scan(0.0, mode="M1", delta=0.0, target_mcse=0.01,
+                          target_power=0.80, alpha=0.05) == 2
+
+    assert P.power_M1(10, 0.0, 0.0, 0.05) == pytest.approx(0.05)
+    assert P.power_M1(10, 0.5, 0.0, 0.05) == 1.0

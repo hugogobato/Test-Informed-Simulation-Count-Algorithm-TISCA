@@ -98,9 +98,14 @@ def power_M1(J, delta, sigma, alpha) -> float:
     J, delta, sigma = float(J), float(delta), float(sigma)
     df = J - 1.0
     crit = _t.ppf(1.0 - alpha / 2.0, df=df)
-    nc = _ncp(J, delta, sigma) if sigma > 0 else 0.0
     if sigma == 0.0:
-        return 1.0
+        # `return 1.0` unconditionally was wrong at delta = 0, which is exactly the
+        # case a degenerate contrast produces: when D_j is identically 0 the
+        # statistic is 0/0 and nothing is detectable, yet the caller was told the
+        # power was 1.0. Branch on the alternative, matching M2-M5 below, which
+        # already report `alpha` when the planning alternative sits inside the null.
+        return 1.0 if delta != 0.0 else alpha
+    nc = _ncp(J, delta, sigma)
     return float(1.0 - (nct_cdf(crit, df, nc) - nct_cdf(-crit, df, nc)))
 
 
@@ -233,12 +238,22 @@ def _mode_requires_margin(mode):
 # --------------------------------------------------------------------------- #
 
 def required_J_mcse(sigma, target_mcse) -> int:
-    """Smallest ``J`` with ``sigma/sqrt(J) <= target_mcse`` (MCSE target, §2.1)."""
+    """Smallest ``J`` with ``sigma/sqrt(J) <= target_mcse`` (MCSE target, §2.1).
+
+    A degenerate ``sigma == 0`` returns 2, not 1. One replication satisfies an MCSE
+    target vacuously, but it leaves ``df = J - 1 = 0``, so the paired t that every
+    downstream target and the final test are defined on does not exist. Two is the
+    smallest admissible size and is what ``required_J_halfwidth`` and
+    ``required_J_power`` already return in the same situation; returning 1 here
+    made ``solve_J_scan`` capable of planning a run no test could be run on.
+    """
     if target_mcse <= 0:
         raise validate.ValidationError("target_mcse must be positive.")
-    if sigma <= 0:
-        return 1
-    return int(math.ceil((sigma / target_mcse) ** 2))
+    if sigma < 0:
+        raise validate.ValidationError("sigma must be non-negative.")
+    if sigma == 0:
+        return 2
+    return max(2, int(math.ceil((sigma / target_mcse) ** 2)))
 
 
 def required_J_halfwidth(sigma, halfwidth, alpha, J_max=_DEFAULT_J_MAX) -> int:
@@ -311,9 +326,19 @@ def required_J_power(
     J_max = int(J_max)
 
     if sigma == 0.0:
-        # Zero variance: M1/M2/M3/M4 targets are vacuous. Fully determined.
-        pw = power_function(mode, 2, delta, sigma, margin=margin, alpha=alpha, exact=exact)
-        return 2 if pw >= target_power else J_max
+        # Zero variance: the target is vacuous, because more replications cannot
+        # reduce an estimation error that is already exactly zero. Rule 8.5 requires
+        # the solver to TERMINATE here ("treat power targets as satisfied") rather
+        # than escalate, so this returns the smallest admissible J unconditionally.
+        #
+        # It deliberately does NOT gate on the achieved power. The power functions
+        # now report the honest rejection probability at sigma = 0, which is `alpha`
+        # when the planning alternative lies inside the null; gating on that would
+        # send every degenerate null contrast to J_max, i.e. spend the entire budget
+        # on a contrast where no J can ever help. Rule 8.5's other half -- report the
+        # degenerate cell -- is handled by the caller (`procedure.py` flags it in
+        # `degenerate_contrasts`).
+        return 2
 
     critical = target_power
     # Fast geometric/scan search. Power is monotone increasing in J for M1-M4 and
