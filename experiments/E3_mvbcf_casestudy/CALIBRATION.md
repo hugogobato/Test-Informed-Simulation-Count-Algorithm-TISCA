@@ -1,6 +1,7 @@
 # E3 — MVBCF case study: calibration and execution log
 
-**Status:** artifacts staged; **execution in progress on the user's Colab sessions**.
+**Status:** artifacts staged; E3 data collection and the primary analysis are
+complete. Remaining verification items are listed below.
 
 ## Prepared artifacts (this task, 2026-08-04)
 
@@ -160,23 +161,107 @@ records here as they are produced:
       `11.0` usable core-hours per 8-hour notebook. Decision: `mc.cores = 2`.
 - [ ] Round 0 pilots: **re-measured** throughput and peak RAM on the real
       workload, per cell. Record CPU model, `nproc`, R version, and wall-clock
-      per replication here (IJDA #14a requires this in the paper).
-- [ ] P3-T5(e) `stochtree::bcf` calibration gate against the published Table 2
-      (BCF PEHE Y1/Y2, BCF tau-95 coverage Y1/Y2): 50-replication means, SEs,
-      and verdict.
-- [ ] P3-T5(f) `fast_bart()` vs `mvbcf::run_mvbcf()` equivalence check.
+      per replication here (IJDA #14a requires this in the paper). Partially
+      superseded: `replication_seconds` and `fit_seconds_*` are recorded on
+      every one of the 4,000 confirmatory rows, so the throughput figure the
+      paper needs can be read off the shipped data rather than re-measured.
+- [x] P3-T5(e) `stochtree::bcf` calibration gate against the published Table 2.
+      Recorded above (2026-08-05 decision and the dual-BCF table).
+- [x] P3-T5(f) superseded in substance by the dual-BCF diagnostic; see above.
 - [ ] P0-T4 library bundle: exact `sessionInfo()`, the `DEPENDENCIES.csv`
       including a non-`NA` `remote_sha` for `skewBART` and `mvbcf`, the
       snapshotted `renv.lock`, the published tarball URL, and the timing of the
       fresh-account restore (the ACCEPTANCE test must run on an account that did
       **not** build the bundle).
-- [ ] P0-T2 acceptance: the four-way identity test of `docs/seed_rng_protocol.md`
+- [x] P0-T2 acceptance: the four-way identity test of `docs/seed_rng_protocol.md`
       §3.5 (`mc.cores` 1 vs 2, shard-aligned vs shard-offset) passing on the real
-      driver. **P0-T2 is not accepted until this is green.**
-- [ ] P0-T2 §3.6: which of `stochtree::bcf`, `dbarts`, `bartCause` and
-      `fast_bart()` actually honour an explicit seed (fit each twice on one
-      replication and compare). Any model that does not is a reproducibility
-      hole that has to be closed before Round 1.
+      driver. **Green, 2026-08-08.** See the seed-verification section below.
+- [ ] P0-T2 §3.6: whether `stochtree::bcf` and `dbarts`/`bartCause` honour their
+      explicit seed argument. Scope now settled by source inspection (below): it
+      applies to those two libraries only, not to four models.
 
 Relevant plan sections: §P0-T3, §P0-T4, §P3-T5(e,f). Acceptances: the
 `stochtree` gate passes before any confirmatory replication runs.
+
+## Seed verification, 2026-08-08 (`notebooks/E3_seed_verification.ipynb`)
+
+Results are in `results/E3/seed_verification.csv` and the per-column detail in
+`results/E3/seed_verification_columns.csv`.
+
+- [x] **P3-T5 acceptance.** Seeds 155, 453 and 495 of DGP1 `n = 500`, drawn by a
+      fixed RNG so the choice is auditable, were re-run and compared against the
+      stored rows on all 159 non-environment columns. Zero columns differ. The
+      stored rows for that cell were produced on ten different Colab hosts, so
+      this is a cross-machine check as well as a re-run check.
+- [x] **P0-T2 §3.5 four-way identity test.** DGP1 `n = 100`, seeds 37 and 38,
+      run at `mc.cores = 1` and `2`, each shard-aligned and shard-offset (the
+      offset run requests the same seeds inside a range starting at 35). All
+      three comparisons against the `cores = 1`, aligned reference differ on 0 of
+      159 columns. The stream for replication index `j` therefore does not depend
+      on the worker count or on where its shard began.
+- [x] **Run-level reproducibility, per model.** `bart`, `bcf`, `mvbart` and
+      `mvbcf` each reproduce all 36 of their columns exactly, maximum absolute
+      difference 0.0. Read this for what it is: it rules out wall-clock or PID
+      seeding and uncontrolled nondeterminism inside a fit. It does **not** by
+      itself attribute that reproducibility to the explicit seed argument, for
+      the reason given next.
+
+### §3.6, per-model seed honouring: scope, and why no re-run is implied
+
+The protocol asks which models honour an explicit seed. Reading the code settles
+most of the question without spending a session, and narrows what is left.
+
+`fast_bart()` (MVBCF) **has no seed argument**. Its signature in the upstream
+`MVBCF_Code.cpp:659` takes 18 arguments, none of them a seed, and every random
+draw inside it goes through R's own generator: `R::runif`, and `rmvnorm`,
+`riwish` and `sample` from `RcppDist`/Rcpp sugar. `Rcpp::export` wraps the call
+in an `RNGScope`, so the function reads and writes `.Random.seed`. There is no
+independent generator anywhere in the file (no `mt19937`, no `rand()`, no
+`arma::randu`/`randn`). MVBCF is therefore governed entirely by §3.3 stream
+positioning, which is exactly what the four-way identity test above validates,
+and `model_seed_mvbcf` is a recorded label rather than an argument that was
+passed. The same holds for `MultiskewBART`, which `run_cell.R` calls without a
+seed argument.
+
+That leaves two libraries that do take one: `stochtree::bcf`
+(`general_params$random_seed = f_seed`) and `dbarts`, used directly for the
+propensity fit (`seed = f_seed`) and underneath `bartCause::bartc`
+(`seed = f_seed`). For these two the discriminating run is the one §3.6
+specifies and which has not been done: fit **the same model, on the same data,
+with the same explicit seed, from two different global RNG states**, and check
+the output is identical. Agreement attributes reproducibility to the seed
+argument; disagreement shows the argument is inert and the global stream is
+doing the work.
+
+**No E3 replication needs to be re-run for this.** It is a property of two R
+packages, tested on one dataset with a handful of fits, and it reads none of the
+4,000 stored rows. Nothing about the stored data is contingent on the outcome:
+exact reproduction has already been demonstrated empirically across ten hosts,
+two worker counts and two shard offsets. What the outcome changes is only what
+the Data Availability statement is entitled to *say*, that is, whether
+reproducibility is attributed to per-model seeding or to global stream
+positioning alone.
+
+`notebooks/E3_seed_honouring.ipynb` (generator
+`notebooks/_generators/build_e3_seed_honouring_nb.py`) runs it, in about 20
+minutes on one Colab session, most of that being environment setup. It is
+standalone: it does not import, source or modify `run_cell.R`, though the DGP
+block and every model call are copied verbatim from it.
+
+**Local pre-check, 2026-08-08 (not the bundle, so not the record).** Two of the
+three fits were run here, off the bundle, on R 4.3.3 with `dbarts` 0.9.33 and
+`stochtree` 0.4.0. Both came back `HONOURS_SEED`:
+
+| fit | values compared | max abs diff, same seed / other global state | max abs diff, other seed / same state | verdict |
+|---|---:|---:|---:|---|
+| `dbarts::bart` (propensity) | 1,000,000 | 0 | 3.594 | HONOURS_SEED |
+| `stochtree::bcf` | 500,000 | 0 | 106.478 | HONOURS_SEED |
+
+The right-hand column is the positive control, and it is what makes the zero in
+the middle column mean something: both fits do respond to their explicit seed, so
+the invariance to the global state is a real property rather than a
+seed-insensitive model producing the same numbers whatever it is told. This is
+strong evidence that §3.6 will come back green, but it is **not** the answer for
+the record, because the package versions are not the bundle's and because
+`bartCause` is not installed locally. Run the notebook on the bundle to close the
+box.

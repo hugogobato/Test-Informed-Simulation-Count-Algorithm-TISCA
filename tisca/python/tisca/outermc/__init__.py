@@ -16,8 +16,13 @@ Public surface:
 """
 
 from . import families
+from . import joint_families
 from .designs import make_design
 from .engine import run_e1
+from .joint_engine import run_joint_cell
 from .oc import summarize_ocs
 
-__all__ = ["families", "make_design", "run_e1", "summarize_ocs"]
+__all__ = [
+    "families", "joint_families", "make_design", "run_e1", "run_joint_cell",
+    "summarize_ocs",
+]

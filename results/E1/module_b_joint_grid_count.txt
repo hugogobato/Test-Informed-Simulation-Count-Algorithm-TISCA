@@ -1,0 +1,20 @@
+Joint Module B grid audit (pre-implementation)
+Generated: 2026-08-08
+Canonical source: tisca/python/tisca/outermc/e1_grid.py::module_b
+
+Exact cell count: 660
+Cell ID range: B_0000 through B_0659
+Seed range: 400000 through 400659
+Unique cell IDs: yes
+
+Decomposition:
+600 cells = K(3) x correction(5) x rho(5) x
+            family(normal, empirical_copula)(2) x theta(2) x design(D3, D4)(2)
+ 60 cells = K(3) x correction(5) x
+            family(empirical row bootstrap)(1) x theta(2) x design(D3, D4)(2)
+
+The nominal count in REVISION_PLAN.md is 600. The actual count is 660 because
+the repaired canonical grid splits the old empirical entry into two declared
+extensions. The empirical-copula extension admits the five design rho levels.
+The row-bootstrap extension preserves the source matrix's own dependence and
+therefore has no free rho factor. No hand-written replacement grid is used.

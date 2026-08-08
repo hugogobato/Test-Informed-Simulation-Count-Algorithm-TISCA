@@ -117,16 +117,23 @@ def romano_wolf_stepdown(
         rng = np.random.default_rng(seed)
         idx = rng.integers(0, J, size=(J, B))
 
-    t_b = np.empty((B, K))
-    for b in range(B):
-        Db = D[idx[:, b], :]
-        mb = Db.mean(axis=0)
-        sb = Db.std(axis=0, ddof=1)
-        se_b = sb / np.sqrt(J)
-        with np.errstate(divide="ignore", invalid="ignore"):
-            tb = np.where(sb > 0, (mb - means) / se_b, 0.0)
-            tb = np.where(sb == 0, 0.0, tb)
-        t_b[b, :] = tb
+    # Evaluate the same ordinary row bootstrap through its multinomial counts.
+    # Row b of ``weights`` is exactly the number of times source row j appears in
+    # ``idx[:, b]``.  Consequently ``weights @ D`` is algebraically identical to
+    # ``D[idx[:, b], :].sum(axis=0)`` while avoiding B Python loops and a large
+    # ``(J, B, K)`` temporary.  Crucially, one count row multiplies the full D
+    # matrix, so all K contrasts still share the identical joint resample.
+    encoded = (idx.T + J * np.arange(B)[:, None]).ravel()
+    weights = np.bincount(encoded, minlength=B * J).reshape(B, J)
+    sums = weights @ D
+    sumsq = weights @ (D * D)
+    mb = sums / J
+    var_b = np.clip((sumsq - J * mb * mb) / (J - 1), 0.0, None)
+    sb = np.sqrt(var_b)
+    se_b = sb / np.sqrt(J)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        t_b = np.where(sb > 0, (mb - means) / se_b, 0.0)
+        t_b = np.where(sb == 0, 0.0, t_b)
 
     # Stepdown: iterate hypotheses from most to least significant.
     # The bootstrap max-statistic is built from |t_b|, so the observed statistic
@@ -147,6 +154,8 @@ def romano_wolf_stepdown(
         p_adj[order[step]] = min(1.0, running)
 
     rejections = np.array(p_adj <= alpha, dtype=bool)
+    observed_corr = np.corrcoef(D, rowvar=False)
+    bootstrap_corr = np.corrcoef(t_b, rowvar=False)
     return {
         "p_values": p_adj,
         "t_stats": t_obs,
@@ -156,6 +165,12 @@ def romano_wolf_stepdown(
         "rejections": rejections,
         "family_size": K,
         "seed": seed,
+        # These diagnostics make the defining joint-resampling property directly
+        # testable.  Every bootstrap draw uses one common row-index vector across
+        # all K columns, so cross-contrast dependence is retained rather than
+        # rebuilt from K independent one-dimensional bootstraps.
+        "observed_contrast_correlation": observed_corr,
+        "bootstrap_stat_correlation": bootstrap_corr,
     }
 
 

@@ -4,5 +4,6 @@ does not reject a zero contrast,True,rejected = [False]
 reports the estimate as exactly zero,True,estimate = 0.0
 bootstrap flags the degenerate sample rather than dividing by zero,True,studentized_paired_bootstrap({0}) sets degenerate=True
 v1 would have run to the budget cap,True,v1 stopped at J = 5050 with power pinned at 0 by the sd > 0 guard
-planner signals the degenerate input rather than returning a number,False,required_J_mcse(0) returns 1 instead of refusing; recommend a ValidationError in both the R and Python ports
-two-stage result flags a zero-variance contrast,False,marginal_power is reported as [1.] for a contrast that is identically zero; recommend a `degenerate_contrasts` field in the result dict
+precision layer returns a testable J on a degenerate contrast,True,"required_J_mcse(0) returns 2; J = 1 leaves df = 0, so the paired t the plan rests on does not exist"
+two-stage result flags a zero-variance contrast,True,"degenerate_contrasts = ['same-model'], marginal_power = [1.] (no longer a blanket 1.0)"
+zero-variance power at a null alternative is not reported as certainty,True,"power_M1(J=2, delta=0, sigma=0) = 0.05, not 1.0; at the declared delta = 0.5 it correctly remains 1.0"

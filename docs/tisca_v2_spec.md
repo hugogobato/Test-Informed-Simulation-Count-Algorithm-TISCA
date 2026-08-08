@@ -187,6 +187,114 @@ So the spec-compliant answer for this case study is `J ≈ 382`, a **2.6× savin
 2. **Pairing is still worth ~2.3×, and that is the claim to make.** Under the *same* multiplicity and inflation settings, the unpaired v1 machinery needs `J_final = 882` against the paired 382. The like-for-like gain from fixing the reviewer's #2 objection is 2.31×; it should be reported as a comparison at matched settings, never as 1000/205.
 3. **`J_final` here is driven entirely by the PEHE-vs-BCF contrasts, and those are the contrasts §1.3 of the plan is about to change.** The BCF benchmark is being recalibrated (P3-T5(e)); when the cold-start `bcf` column is replaced by the calibrated warm-start one, `σ_D` for the PEHE contrasts changes and `J_final` moves with it. Every number in this table is therefore **provisional until the P3-T5(e) gate passes**, and no version of it belongs in the abstract before then.
 
+### 4.6 Implemented joint Module-B validation design
+
+The operating-characteristics implementation is
+`outermc/joint_families.py` plus `outermc/joint_engine.py`. It is deliberately
+separate from the scalar engine so that the old marginal Module-B output remains
+an auditable provenance artifact.
+
+For each outer repetition, the replication-level object is
+
+```
+L = (L_A, L_B1, ..., L_BK)' in R^(K+1),
+C = [1_K, -I_K],
+D = C L,                  D_k = L_A - L_Bk.
+```
+
+The generated array has shape `(R, J, K+1)`. Column zero is generated once and is
+used in every contrast. Benchmark columns are generated separately; copying one
+two-column block K times is an invalid input and is tested against explicitly.
+
+For the canonical normal joint family, let `E = (E_1,...,E_K)` have an
+equicorrelation `eta`, with `eta = 0` in the grid, and set
+
+```
+Z_Bk = rho Z_A + sqrt(1-rho^2) E_k,
+L_A  = sigma_A Z_A,
+L_Bk = sigma_B Z_Bk - theta_k.
+```
+
+This is a constructive positive-semidefinite loss law. Its declared covariance is
+
+```
+Var(L_A)       = sigma_A^2,
+Cov(L_A,L_Bk)  = rho sigma_A sigma_B,
+Var(L_Bk)      = sigma_B^2,
+Cov(L_Bk,L_Bl) = sigma_B^2 [rho^2 + (1-rho^2) eta],  k != l.
+```
+
+The implied replication-level contrast covariance is computed and saved as
+`Sigma_D = C Sigma_L C'`. In particular,
+
+```
+Var(D_k)       = sigma_A^2 + sigma_B^2 - 2 rho sigma_A sigma_B,
+Cov(D_k,D_l)   = sigma_A^2 - 2 rho sigma_A sigma_B
+                 + sigma_B^2 [rho^2 + (1-rho^2) eta].
+```
+
+The means are not drawn directly with covariance `Sigma_D`. Replication-level
+loss rows are generated first, contrasts are formed row by row, and their sample
+means inherit covariance `Sigma_D/J`.
+
+The empirical source contains one observed control and one observed benchmark.
+For K=1, `empirical` is the exact row bootstrap of that pair. For K>1, a real
+joint benchmark law is not identified. The implementation therefore labels both
+empirical K-benchmark constructions as synthetic covariance extensions. They
+retain the empirical control and benchmark marginals, share one control latent
+draw, and give every benchmark a distinct Gaussian-copula residual. The
+`empirical_copula` cells use the grid's declared latent `rho`; the row-bootstrap
+extension maps the source Spearman correlation to its Gaussian-copula latent
+correlation. These cells must not be interpreted as an estimated real-data
+K-benchmark covariance.
+
+For every grid cell, `module_b_joint_covariance.csv` stores the declared
+parameters, `Sigma_L`, the contrast map C, implied `Sigma_D`, its correlation,
+the minimum eigenvalues, and the achieved correlation from an independent
+diagnostic draw. The full 660-cell run has minimum eigenvalues 0.19 for
+`Sigma_D` and 0.03157 for `Sigma_L`; all exact mapping and shared-control checks
+pass and no repeated benchmark column is detected.
+
+All K p-values are decided jointly. `none` uses the unadjusted marginal p-values,
+Bonferroni and Holm control FWER, and BH applies its step-up family decision and
+reports FDR separately. Romano-Wolf resamples the full `(J,K)` contrast matrix:
+one row-index vector is used for every column in each bootstrap draw, so the
+cross-contrast dependence is preserved. D4 uses paired t statistics. D3 retains
+the legacy unpaired Welch planning/testing path for the design comparison, except
+that K>1 Romano-Wolf necessarily operates on the paired contrast matrix specified
+for that procedure.
+
+For contrast k, the marginal rate is
+`p_k = R^(-1) sum_r I(reject_rk)`. The main CSV saves every `p_k` and its MCSE;
+the headline marginal field is their mean. With `H_0` the true-null indices and
+`H_1` the declared alternatives,
+
+```
+FWER               = P(any k in H_0 is rejected),
+conjunctive power  = P(all k in H_1 are rejected),
+disjunctive power  = P(any k in H_1 is rejected),
+FDR                 = E[V / max(S,1)]              (BH field).
+```
+
+Undefined rates are stored as NA. Every rate uses the requested outer-Monte-Carlo
+standard error `sqrt(p_hat(1-p_hat)/R)`. Bias, RMSE, CI coverage, `E[J]`, `sd(J)`,
+the J quantiles, `P(J=J_max)`, per-repetition wall time, and the canonical seed
+are retained.
+
+The exact implemented grid has 660 cells, not the old plan's nominal 600. The
+extra 60 are the empirical row-bootstrap cells whose natural dependence admits no
+free `rho`; the 600 remaining cells contain normal and empirical-copula families
+at all five rho levels. Fixed-size addressable `SeedSequence` blocks make results
+independent of outer chunk and shard offsets. The local and Colab runners use the
+same `e1_grid.module_b` object and the same seeds.
+
+One distinction from the nested planner in §4.4 is intentional and must remain
+visible in reporting: the canonical Romano-Wolf E1 cells retain the existing
+planning schedule at family alpha. Module B measures the actual marginal,
+conjunctive, and disjunctive power of the final joint stepdown decisions; it does
+not claim that these cells implement a nested Romano-Wolf planner or guarantee a
+target conjunctive power.
+
 ---
 
 ## 5. The two-stage default procedure — Algorithm 1 (C7, C8)

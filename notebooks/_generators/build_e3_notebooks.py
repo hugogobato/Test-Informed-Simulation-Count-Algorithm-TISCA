@@ -252,15 +252,19 @@ def _shared_cells(bundle_source, bundle_sha, row, repo_root):
                 [sys.executable, "-m", "pip", "install", "-q", "gdown"],
                 check=True,
             )
-            download = subprocess.run(
+            # NOT `download`: that name is the Colab-download helper defined in the
+            # setup cell, and binding a CompletedProcess to it here made the final
+            # cell of E3_seed_verification.ipynb die with "'CompletedProcess' object
+            # is not callable" after a 50-minute run had already succeeded.
+            gdown_proc = subprocess.run(
                 [sys.executable, "-m", "gdown", "--folder", BUNDLE_FOLDER_URL,
                  "--output", str(BUNDLE_DOWNLOAD_DIR), "--remaining-ok"],
                 capture_output=True, text=True,
                 encoding="utf-8", errors="replace",
             )
-            print(download.stdout[-4000:])
-            if download.returncode != 0:
-                print(download.stderr[-4000:])
+            print(gdown_proc.stdout[-4000:])
+            if gdown_proc.returncode != 0:
+                print(gdown_proc.stderr[-4000:])
                 raise RuntimeError("Google Drive bundle download failed")
             tar_candidates = sorted(BUNDLE_DOWNLOAD_DIR.rglob("tisca_rlib.tar.gz"))
             sha_candidates = sorted(BUNDLE_DOWNLOAD_DIR.rglob("tisca_rlib.sha256"))

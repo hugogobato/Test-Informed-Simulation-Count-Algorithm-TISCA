@@ -1,6 +1,6 @@
 # P3-T3 verdict: is the iterative loop worth it?
 
-Use the two-stage design (D4) unless a larger budget is acceptable in itself: the loop's extra power (+0.069) is bought with 2.06x the replications, so it is a bigger design rather than a better one. At the planning alternative D4 achieves power 0.840 (target 0.8) at E[J] = 73, against the oracle's 0.817 at E[J] = 65; its unconditional Type I error is 0.0494 (nominal 0.05, MCSE 0.0031). The adaptive loop's effect on the level is +0.0033 (within 2 MCSE), and it spends 2.06x the replications for +0.069 power.
+Use the two-stage design (D4) unless a larger budget is acceptable in itself: the loop's extra power (+0.069) is bought with 2.06x the replications, so it is a bigger design rather than a better one. At the planning alternative D4 achieves power 0.840 (target 0.8) at E[J] = 73, against the oracle's 0.816 at E[J] = 64; its unconditional Type I error is 0.0494 (nominal 0.05, MCSE 0.0031). The adaptive loop's effect on the level is +0.0033 (within 2 MCSE), and it spends 2.06x the replications for +0.069 power.
 
 TISCA v1 (D3) is CONSERVATIVE, not liberal: its level falls to 0.0004 at rho = 0.9 against a nominal 0.05, and it spends 2.39x the replications of v2. Fixing the paired-design error therefore buys efficiency, not validity.
 
@@ -15,7 +15,7 @@ The precision target (D5) is far more demanding than the power target at these s
 | D3       | D3 TISCA v1: unpaired Welch, iterative          |       144 |        0.0314 |       0.0882 |        0.0025 |                    7 |          0.8966 |       0.8684 |      0.7612 |                     4 |    80.7025 |   80.9368 |    42.8725 |    175.597  |       0.0036 |     0.0005 |     0.1453 | Module A (all families) |
 | D4       | D4 TISCA v2: paired, two-stage (Algorithm 1)    |       144 |        0.0494 |       0.0762 |        0.0031 |                    2 |          0.9506 |       0.8404 |      0.7286 |                     4 |    73.3357 |   73.2875 |    47.0905 |    180.683  |       0.0048 |     0.001  |     0.1814 | Module A (all families) |
 | D5       | D5 paired fixed-precision (MCSE target)         |       144 |        0.0485 |       0.0554 |        0.003  |                    0 |          0.9515 |       0.9958 |      0.8936 |                     0 |   563.973  |  564.424  |   126.462  |    740.706  |       0.1714 |     0.0001 |     0.0595 | Module A (all families) |
-| D6       | D6 oracle fixed-J (true sigma known)            |       144 |        0.0495 |       0.071  |        0.0031 |                    3 |          0.9505 |       0.8171 |      0.7556 |                     3 |    64.6667 |   64.6667 |     0      |     64.6667 |       0      |     0.0006 |     0.1712 | Module A (all families) |
+| D6       | D6 oracle fixed-J (true sigma known)            |       144 |        0.0497 |       0.071  |        0.0031 |                    3 |          0.9503 |       0.816  |      0.7498 |                     3 |    64.2222 |   64.2222 |     0      |     64.2222 |       0      |     0.0007 |     0.1715 | Module A (all families) |
 
 ## Matched comparisons
 
@@ -25,4 +25,4 @@ The precision target (D5) is far more demanding than the power target at these s
 | D3 - D4      | TISCA v1 (unpaired, iterative) vs TISCA v2       |         -0.0165 |         0.0762 |         0.022  |         -0.1178 |      15.2177 |      2.3864 |         135 |
 | D1 - D4      | raw-pilot fixed-J vs variance-inflated two-stage |          0.0006 |         0.01   |        -0.0605 |         -0.0808 |     -13.2487 |      0.841  |          54 |
 | D5 - D4      | precision target vs power target                 |         -0.0007 |         0.0218 |         0.1488 |          0.0828 |     525.598  |      8.4714 |          54 |
-| D4 - D6      | two-stage vs the oracle it approximates          |         -0.0006 |         0.02   |         0.027  |         -0.0952 |      11.4725 |      1.1751 |          54 |
+| D4 - D6      | two-stage vs the oracle it approximates          |         -0.0007 |         0.019  |         0.0282 |         -0.0914 |      11.8614 |      1.1795 |          54 |

@@ -1,0 +1,10 @@
+check,detail,pass
+P3-T5: 3 random seeds reproduce their stored rows exactly,"seeds [155, 453, 495], 159 columns each; 0 differing",True
+cross-machine: the stored rows came from a different host,"stored hosts ['14725f91535f', '219cca6bd509', '21b070230cc6', '463b712badcb', '613a6588e37d', '6973bbaf313f', '9e5ba4411b70', 'abb1cb188ba5', 'db923aee388b', 'f9601cdf3825'] vs this session",True
+P0-T2 four-way identity: cores1_aligned == cores2_aligned,0 of 159 columns differ,True
+P0-T2 four-way identity: cores1_aligned == cores1_offset,0 of 159 columns differ,True
+P0-T2 four-way identity: cores1_aligned == cores2_offset,0 of 159 columns differ,True
+run-level reproducibility of bart,"0 of 36 columns differ, max |diff| = 0.0",True
+run-level reproducibility of bcf,"0 of 36 columns differ, max |diff| = 0.0",True
+run-level reproducibility of mvbart,"0 of 36 columns differ, max |diff| = 0.0",True
+run-level reproducibility of mvbcf,"0 of 36 columns differ, max |diff| = 0.0",True
