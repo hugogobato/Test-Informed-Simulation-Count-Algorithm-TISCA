@@ -1,0 +1,8 @@
+check,pass,detail
+terminates on identical models,True,"J_final = 2, p = 1.0"
+does not reject a zero contrast,True,rejected = [False]
+reports the estimate as exactly zero,True,estimate = 0.0
+bootstrap flags the degenerate sample rather than dividing by zero,True,studentized_paired_bootstrap({0}) sets degenerate=True
+v1 would have run to the budget cap,True,v1 stopped at J = 5050 with power pinned at 0 by the sd > 0 guard
+planner signals the degenerate input rather than returning a number,False,required_J_mcse(0) returns 1 instead of refusing; recommend a ValidationError in both the R and Python ports
+two-stage result flags a zero-variance contrast,False,marginal_power is reported as [1.] for a contrast that is identically zero; recommend a `degenerate_contrasts` field in the result dict

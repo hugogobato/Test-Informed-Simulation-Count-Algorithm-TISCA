@@ -1,0 +1,51 @@
+venue_key,venue,publisher,n_papers,entry_types,publisher_type,publisher_family,doaj_listed,doaj_apc_charged,doaj_issn,confidence,source
+__novenue__arxiv,,arXiv,11,misc,preprint,preprint-server,0,,,high,entry type @misc
+__novenue__jstor,,JSTOR,1,article,working-paper,other,0,,,high,no journal field
+__novenue__national bureau of economic research nber,,National Bureau of Economic Research (NBER),1,book,book-chapter,other,0,,,high,entry type @incollection/@book
+advances in neural information processing systems,Advances in Neural Information Processing Systems,"Curran Associates, Inc.",6,inproceedings,conference,conference,0,,,high,entry type / proceedings title
+bayesian analysis,Bayesian Analysis,Institute of Mathematical Statistics,1,article,diamond-OA,society,1,0,1931-6690,high,DOAJ exact title match (1931-6690)
+bioinformatics,Bioinformatics,Oxford University Press (OUP),1,article,hybrid/subscription,university-press,0,,,high,not listed in DOAJ
+biometrical journal,Biometrical Journal,Wiley,1,article,hybrid/subscription,commercial,0,,,high,not listed in DOAJ
+biometrics,Biometrics,Oxford University Press (OUP),2,article,hybrid/subscription,university-press,0,,,high,not listed in DOAJ
+biometrika,Biometrika,Oxford University Press (OUP),1,article,hybrid/subscription,university-press,0,,,high,not listed in DOAJ
+computational statistics & data analysis,Computational Statistics &amp; Data Analysis,Elsevier BV,1,article,hybrid/subscription,commercial,0,,,high,not listed in DOAJ
+contemporary clinical trials,Contemporary Clinical Trials,Elsevier BV,1,article,hybrid/subscription,commercial,0,,,high,not listed in DOAJ
+cpt pharmacometrics & systems pharmacology,CPT: Pharmacometrics &amp; Systems Pharmacology,Wiley,1,article,hybrid/subscription,commercial,0,,,high,not listed in DOAJ
+econometric reviews,Econometric Reviews,Informa UK Limited,1,article,hybrid/subscription,commercial,0,,,high,not listed in DOAJ
+empirical economics,Empirical Economics,Springer Science and Business Media LLC,1,article,hybrid/subscription,commercial,0,,,high,not listed in DOAJ
+frontiers in applied mathematics and statistics,Frontiers in Applied Mathematics and Statistics,Frontiers Media SA,1,article,gold-OA,commercial,1,1,2297-4687,high,DOAJ exact title match (2297-4687)
+handbook of statistical methods for precision medicine,Handbook of Statistical Methods for Precision Medicine,Chapman and Hall/CRC,1,incollection,book-chapter,other,0,,,high,entry type @incollection/@book
+health economics,Health Economics,Wiley,1,article,hybrid/subscription,commercial,0,,,high,not listed in DOAJ
+health services and outcomes research methodology,Health Services and Outcomes Research Methodology,Springer Science and Business Media LLC,1,article,hybrid/subscription,commercial,0,,,high,not listed in DOAJ
+international conference on learning representations,International Conference on Learning Representations,International Conference on Learning Representations (ICLR),1,inproceedings,conference,conference,0,,,high,entry type / proceedings title
+journal of applied econometrics,Journal of Applied Econometrics,Wiley,1,article,hybrid/subscription,commercial,0,,,high,not listed in DOAJ
+journal of business & economic statistics,Journal of Business \& Economic Statistics,Informa UK Limited,3,article,hybrid/subscription,commercial,0,,,high,not listed in DOAJ
+journal of causal inference,Journal of Causal Inference,Walter de Gruyter GmbH,4,article,gold-OA,commercial,1,1,2193-3677;2193-3685,high,DOAJ exact title match (2193-3677;2193-3685)
+journal of computational and graphical statistics,Journal of Computational and Graphical Statistics,Informa UK Limited,3,article,hybrid/subscription,commercial,0,,,high,not listed in DOAJ
+journal of econometrics,Journal of Econometrics,Elsevier BV,1,article,hybrid/subscription,commercial,0,,,high,not listed in DOAJ
+journal of educational and behavioral statistics,Journal of Educational and Behavioral Statistics,American Educational Research Association (AERA),2,article,hybrid/subscription,society,0,,,high,not listed in DOAJ
+journal of statistical research,Journal of Statistical Research,Bangladesh Academy of Sciences,1,article,hybrid/subscription,society,0,,,high,not listed in DOAJ
+journal of the american statistical association,Journal of the American Statistical Association,Informa UK Limited,6,article,hybrid/subscription,commercial,0,,,high,not listed in DOAJ
+journal of the royal statistical society series a statistics in society,Journal of the Royal Statistical Society Series A: Statistics in Society,Oxford University Press (OUP),5,article,hybrid/subscription,university-press,0,,,high,not listed in DOAJ
+journal of the royal statistical society series b statistical methodology,Journal of the Royal Statistical Society Series B: Statistical Methodology,Oxford University Press (OUP),2,article,hybrid/subscription,university-press,0,,,high,not listed in DOAJ
+multivariate behavioral research,Multivariate Behavioral Research,Informa UK Limited,3,article,hybrid/subscription,commercial,0,,,high,not listed in DOAJ
+political analysis,Political Analysis,Cambridge University Press (CUP),1,article,hybrid/subscription,university-press,0,,,high,not listed in DOAJ
+proceedings of the 24th international conference on artificial intelligence and statistics,Proceedings of The 24th International Conference on Artificial Intelligence and Statistics,PMLR,1,inproceedings,conference,conference,0,,,high,entry type / proceedings title
+proceedings of the 25th international conference on artificial intelligence and statistics,Proceedings of The 25th International Conference on Artificial Intelligence and Statistics,PMLR,1,,hybrid/subscription,other,0,,,high,not listed in DOAJ
+proceedings of the 26th international conference on artificial intelligence and statistics,Proceedings of The 26th International Conference on Artificial Intelligence and Statistics,PMLR,2,inproceedings,conference,conference,0,,,high,entry type / proceedings title
+proceedings of the 29th acm international conference on information & knowledge management,Proceedings of the 29th ACM International Conference on Information &amp; Knowledge Management,ACM,1,inproceedings,conference,conference,0,,,high,entry type / proceedings title
+proceedings of the 34th international conference on machine learning,Proceedings of the 34th International Conference on Machine Learning,PMLR,1,inproceedings,conference,conference,0,,,high,entry type / proceedings title
+proceedings of the 37th international conference on machine learning,Proceedings of the 37th International Conference on Machine Learning,PMLR,1,inproceedings,conference,conference,0,,,high,entry type / proceedings title
+proceedings of the 40th international conference on machine learning,Proceedings of the 40th International Conference on Machine Learning,PMLR,1,,hybrid/subscription,other,0,,,high,not listed in DOAJ
+proceedings of the aaai conference on artificial intelligence,Proceedings of the AAAI Conference on Artificial Intelligence,Association for the Advancement of Artificial Intelligence (AAAI),2,article,conference,conference,0,,,high,entry type / proceedings title
+proceedings of the national academy of sciences,Proceedings of the National Academy of Sciences,Proceedings of the National Academy of Sciences,1,article,hybrid/subscription,society,0,,,high,not listed in DOAJ
+proceedings of the neural information processing systems track on datasets and benchmarks,Proceedings of the Neural Information Processing Systems Track on Datasets and Benchmarks,Curran,1,inproceedings,conference,conference,0,,,high,entry type / proceedings title
+psychological methods,Psychological Methods,American Psychological Association (APA),1,article,hybrid/subscription,society,0,,,high,not listed in DOAJ
+review of economics and statistics,Review of Economics and Statistics,MIT Press - Journals,1,article,hybrid/subscription,university-press,0,,,high,not listed in DOAJ
+sociological methods & research,Sociological Methods &amp; Research,SAGE Publications,1,article,hybrid/subscription,commercial,0,,,high,not listed in DOAJ
+statistica sinica,Statistica Sinica,Statistica Sinica (Institute of Statistical Science),1,article,hybrid/subscription,society,0,,,high,not listed in DOAJ
+statistical methods in medical research,Statistical Methods in Medical Research,SAGE Publications,2,article,hybrid/subscription,commercial,0,,,high,not listed in DOAJ
+statistics in medicine,Statistics in Medicine,Wiley,10,article,hybrid/subscription,commercial,0,,,high,not listed in DOAJ
+the annals of applied statistics,The Annals of Applied Statistics,Institute of Mathematical Statistics,3,article,hybrid/subscription,society,0,,,high,not listed in DOAJ
+the annals of statistics,The Annals of Statistics,Institute of Mathematical Statistics,1,article,hybrid/subscription,society,0,,,high,not listed in DOAJ
+the international journal of biostatistics,The International Journal of Biostatistics,Walter de Gruyter GmbH,1,article,hybrid/subscription,commercial,0,,,high,not listed in DOAJ

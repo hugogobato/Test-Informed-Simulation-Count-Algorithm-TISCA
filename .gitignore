@@ -32,3 +32,4 @@ tisca/tests/parity_resampling_spec.json
 # figures/ (the paper promises them); do not blanket-ignore *.csv here so we
 # do not accidentally hide promised public data.
 env/tisca_rlib.tar.gz
+docs/

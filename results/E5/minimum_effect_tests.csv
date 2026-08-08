@@ -1,0 +1,4 @@
+contrast,estimate,margin,p_minimum_effect,beats_margin
+AR(1) vs AR(2),-0.0026887526902536077,-0.05,1.0,False
+AR(1) vs naive,-0.17071278212669946,-0.05,0.0,True
+AR(1) vs mean,-0.980865786786058,-0.05,0.0,True

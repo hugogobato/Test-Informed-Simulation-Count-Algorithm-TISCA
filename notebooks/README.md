@@ -17,6 +17,11 @@ model described in `REVISION_PLAN.md` §5.
 | `E3_round0_pilot_calibration.ipynb` | **P3-T5(e)** | Round 0 pilot (50 independent-seed reps of DGP1/n=500) plus the **P3-T5(e) gate**: compare the calibrated `stochtree::bcf` means to McJames et al. DGP1 Table 2. No confirmatory shard runs until this passes. |
 | `E3_round0_dual_bcf_pilot.ipynb` | **BCF diagnostic Round 0** | Paired DGP1/n=500 pilot using the corrected `stochtree::bcf` translation and the original `bcf` package settings. Reports separate PEHE and coverage bands in one CSV. |
 | `E4_bibliometric_analysis.ipynb` | **P3-T1(b)** | clones the repo when uploaded alone, runs `code_bibliometrics.py` if `bibliometric_coded.csv` is absent, then recounts the section **from code** (no percentage literals), corrects denominators (99/88), and emits `Fig_bib_*.png`. |
+| `E2_design_comparison.ipynb` | **P3-T3** | analysis-only over the E1 output: the six designs D1-D6 on achieved level, achieved power and E[J], the matched design-versus-design table, and the generated verdict sentence answering Reviewer 2 paragraph 4. Writes `results/E2/`. |
+| `E1b_skewness_calibration.ipynb` | **P3-T4** | the evidence replacing the deleted "J > 30" claim: Type I error of the paired t and of the studentized paired bootstrap against J, panelled by the standardised third moment of D, with Berry-Esseen as the explanatory frame. Runs its own fixed-J sweep (the E1 designs each choose their own J). Writes `results/E1b/`. |
+| `E1c_no_difference.ipynb` | **P3-T7** | the "what if there is no difference" case, separated into equal-expected-loss, same-model-twice, and perfectly-correlated. Shows where v1 runs to the budget cap, and drafts the Section 3.10 paragraph. Writes `results/E1c/`. |
+| `E5_generality_demo.ipynb` | **P3-T6** | the complete v2 workflow on AR(1) forecasting, where the ranking of the four competitors is known in closed form, so every output is checked rather than reported. Writes `results/E5/`. About a minute. |
+| `E3_seed_verification.ipynb` | **P3-T5 / P0-T2 acceptance** | re-runs 3 randomly chosen seeds and compares them to the stored rows exactly, plus the four-way `mc.cores` x shard-offset identity test, and reads the per-model seed-honouring verdict off the column comparison. ~50 min, one session. Writes `results/E3/seed_verification.csv` and the block to paste into `CALIBRATION.md`. |
 
 `P0T4_build_rlib_bundle.ipynb` is the main notebook to run once during Phase 0.
 The E3 shard set is generated with the public Drive folder containing the
@@ -62,3 +67,34 @@ dual BCF notebook with
 three complete E1 runners with
 `python notebooks/_generators/build_e1_modules_nb.py`. Keep the generator and the
 `.ipynb` files in sync when you edit either.
+
+
+## Running E1 without Colab
+
+`E1_modA_C_D.ipynb` and the two Module-B shards remain the Colab path, but the whole
+E1 grid is a few minutes of pure NumPy on a workstation. Prefer:
+
+```bash
+python experiments/E1_operating_characteristics/run_e1_grid.py        # all 1,983 cells
+python experiments/E1_operating_characteristics/run_e1_grid.py -j 6   # fewer workers
+```
+
+It writes `results/E1/operating_characteristics.csv` directly, is resumable by
+`cell_id`, and asserts grid completeness before finishing. **Worker count is chosen
+from available RAM, not from core count**: each worker holds an `(R, J_max, 2)` block
+and peaks around 0.5 GB, so the default takes at most half of currently available
+memory. Pass `-j` explicitly only if you know the machine is otherwise idle.
+
+The canonical grid lives in `tisca/python/tisca/outermc/e1_grid.py` and is imported by
+both the local runner and the notebook generator, so the two cannot drift.
+
+## The four analysis notebooks
+
+`E2_design_comparison.ipynb`, `E1b_skewness_calibration.ipynb` and
+`E1c_no_difference.ipynb` all read `results/E1/operating_characteristics.csv`, so run
+the E1 grid first. `E5_generality_demo.ipynb` is self-contained. All four detect a
+local checkout and fall back to cloning on Colab, and all four keep the
+`google.colab.files.download` fallback. Regenerate them from
+`notebooks/_generators/build_e2_design_comparison_nb.py`,
+`build_e1b_skewness_nb.py`, `build_e1c_no_difference_nb.py` and
+`build_e5_generality_nb.py`; shared boilerplate is in `_generators/_nbcommon.py`.

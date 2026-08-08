@@ -33,7 +33,10 @@ FAMILIES = {
     "mix": "normal + 2% catastrophic-failure mixture (family d)",
     "beta": "Beta near the upper boundary, coverage-like (family e)",
     "t3": "bivariate Student-t, 3 df (family f)",
-    "empirical": "row-bootstrap of a supplied loss matrix (family g)",
+    "empirical": ("row bootstrap of a supplied loss matrix, real joint dependence "
+                  "(family g; rho is fixed by the data, pass rho=None)"),
+    "empirical_copula": ("empirical marginals of a supplied loss matrix coupled by "
+                         "the design's Gaussian copula (family g', rho is free)"),
 }
 
 
@@ -89,6 +92,114 @@ def _marginal_moments(family):
 
 _MOMENTS = {f: _marginal_moments(f) for f in ("lognormal", "gamma", "t3", "beta")}
 
+
+# --- empirical family (g) -----------------------------------------------------
+#
+# The v1 implementation was ``matrix[idx]``: a row bootstrap that silently ignored
+# ``theta``, ``rho``, ``sigma_a`` and ``sigma_b``. That made every design factor
+# inert. Its ``theta = 0`` cells were not nulls at all -- the real MVBCF-minus-BCF
+# PEHE matrix carries E[D] = -2.20 -- so the measured "Type I error" was 1.000 for
+# D1-D5 and 0.948 for the oracle D6, and the five rho levels were exact duplicates.
+#
+# The repair splits family (g) in two, because no single construction can both
+# preserve the real joint dependence and let the design set rho:
+#
+#   ``empirical``          row bootstrap. Both losses come from the SAME observed
+#                          replication, so the real joint structure survives intact
+#                          and so does skew(D) = -1.55, which is the realism this
+#                          family contributes to the P3-T4 skewness sub-study. rho
+#                          is therefore not a free factor: requesting one raises.
+#   ``empirical_copula``   the real marginals (empirical quantile functions), coupled
+#                          by the same Gaussian copula the other families use, so
+#                          rho IS a free factor. Shape is real, dependence is by
+#                          design, and skew(D) is close to 0 because differencing two
+#                          similarly right-skewed marginals under an exchangeable
+#                          copula is nearly symmetric.
+#
+# Both centre and scale with the empirical column moments, which ARE the population
+# constants of the bootstrap law, so the warning in ``_standardise_scaled`` about
+# per-sample standardisation is respected. ``empirical_natural_rho`` reports the
+# matrix's own dependence (the level ``empirical_copula`` has to match to be
+# comparable) and ``empirical_effect`` the real standardised effect.
+
+
+def _check_matrix(matrix):
+    """Validate and return the (M, 2) loss matrix both empirical families need."""
+    if matrix is None:
+        raise ValueError("empirical families require a (M, 2) loss matrix")
+    mat = np.asarray(matrix, dtype=float)
+    if mat.ndim != 2 or mat.shape[1] != 2 or mat.shape[0] < 2:
+        raise ValueError(f"loss matrix must have shape (M >= 2, 2), got {mat.shape}")
+    if not np.all(np.isfinite(mat)):
+        raise ValueError("loss matrix contains non-finite values")
+    return mat
+
+
+def _empirical_standardise(pair, matrix, sigma_a, sigma_b, theta):
+    """Centre and scale drawn pairs by the matrix's own moments; shift to ``E[D] = theta``.
+
+    Each column is centred on its own mean (a location shift changes neither shape
+    nor dependence, and it is what makes ``E[D] = theta`` exact), but BOTH are
+    divided by the SAME constant, the root-mean-square of the two column sds. A
+    common divisor is an affine map of the pair, so the row bootstrap keeps the real
+    joint shape exactly: skew(D) stays at the data's -1.55 and the real marginal
+    variance ratio (2.17 vs 3.21 on the PEHE scale) is retained rather than being
+    forced to 1. Dividing each column by its own sd would instead reweight the
+    contrast and pull skew(D) to -0.98, discarding part of the realism this family
+    is here to supply. ``sigma_a`` / ``sigma_b`` then multiply on top of the real
+    ratio, so the design's variance-ratio factor still works.
+    """
+    mom = empirical_moments(matrix)
+    scale = float(np.sqrt((mom[0][1] ** 2 + mom[1][1] ** 2) / 2.0))
+    out = np.stack([(pair[..., 0] - mom[0][0]) / scale * sigma_a,
+                    (pair[..., 1] - mom[1][0]) / scale * sigma_b], axis=-1)
+    out[..., 1] -= theta
+    return out
+
+
+def _empirical_quantile(column, u):
+    """Empirical inverse CDF of ``column`` evaluated at uniforms ``u``.
+
+    Equal mass on each of the M observed values, so the mean and sd of the result
+    are exactly the column's own mean and (population) sd -- which is what makes
+    the centring in ``sample_batch`` exact rather than approximate.
+    """
+    order = np.sort(np.asarray(column, dtype=float))
+    m = order.shape[0]
+    idx = np.minimum((np.asarray(u) * m).astype(np.intp), m - 1)
+    return order[idx]
+
+
+def empirical_moments(matrix):
+    """``((mean_A, sd_A), (mean_B, sd_B))`` of the two columns, population (ddof=0)."""
+    matrix = np.asarray(matrix, dtype=float)
+    return tuple((float(matrix[:, k].mean()), float(matrix[:, k].std(ddof=0)))
+                 for k in (0, 1))
+
+
+def empirical_natural_rho(matrix, kind="spearman"):
+    """Dependence actually present in the supplied loss matrix.
+
+    ``kind='spearman'`` is the one comparable with the design's ``rho``, because
+    ``rho`` enters as a Gaussian-copula RANK dependence; ``kind='pearson'`` is
+    reported alongside it for the manuscript.
+    """
+    matrix = np.asarray(matrix, dtype=float)
+    if kind == "pearson":
+        return float(np.corrcoef(matrix[:, 0], matrix[:, 1])[0, 1])
+    return float(stats.spearmanr(matrix[:, 0], matrix[:, 1]).statistic)
+
+
+def empirical_effect(matrix):
+    """Real standardised paired effect ``E[D] / sd(D)`` of the supplied matrix.
+
+    Reported so the manuscript can say where the actual case-study contrast sits
+    on the ``theta`` axis of the E1 grid instead of asserting a round number.
+    """
+    matrix = np.asarray(matrix, dtype=float)
+    d = matrix[:, 0] - matrix[:, 1]
+    return float(d.mean() / d.std(ddof=1))
+
 # Families whose *marginal* is skewed/heavy-tailed. Applying the same marginal to
 # both methods and coupling them with an exchangeable Gaussian copula makes the
 # pair (L_A, L_B) exchangeable when sigma_a == sigma_b, and an exchangeable pair
@@ -134,6 +245,22 @@ def sample_batch(family, R, J, rho=0.0, sigma_a=1.0, sigma_b=1.0, theta=0.0,
     if rng is None:
         ss = np.random.SeedSequence(master_seed)
         rng = np.random.default_rng(ss)
+    if family == "empirical":
+        # Row bootstrap: the pair is taken from ONE observed replication, so the
+        # real joint dependence -- and with it the real skew(D) = -1.55, which is
+        # what this family exists to carry into the P3-T4 sub-study -- is retained
+        # exactly. rho cannot be imposed on top of that, so requesting one is an
+        # error rather than a silently ignored argument (see the note above).
+        mat = _check_matrix(matrix)
+        if rho is not None:
+            raise ValueError(
+                "family 'empirical' is a row bootstrap: it reproduces the loss "
+                "matrix's own dependence and cannot be set to rho=%r. Pass "
+                "rho=None, or use family 'empirical_copula' to control rho." % (rho,))
+        idx = rng.integers(0, mat.shape[0], size=(R, J))
+        return _empirical_standardise(mat[idx], mat, sigma_a, sigma_b, theta)
+    if rho is None:
+        raise ValueError(f"family {family!r} requires a numeric rho")
     z = _gauss_z(rng, (R, J), rho)                     # (R, J, 2) z-scores
     if family == "normal":
         block = np.stack([z[..., 0] * sigma_a, z[..., 1] * sigma_b - theta], axis=-1)
@@ -145,11 +272,12 @@ def sample_batch(family, R, J, rho=0.0, sigma_a=1.0, sigma_b=1.0, theta=0.0,
         sign = rng.choice([-1.0, 1.0], size=(R, J))
         block[..., 1] += np.where(cat, sign * mag, 0.0)
         return block
-    if family == "empirical":
-        if matrix is None or matrix.shape[1] != 2:
-            raise ValueError("empirical family requires a (M, 2) loss matrix")
-        idx = rng.integers(0, matrix.shape[0], size=(R, J))
-        return matrix[idx]
+    if family == "empirical_copula":
+        mat = _check_matrix(matrix)
+        u = stats.norm.cdf(z)                          # Gaussian copula uniforms
+        pair = np.stack([_empirical_quantile(mat[:, 0], u[..., 0]),
+                         _empirical_quantile(mat[:, 1], u[..., 1])], axis=-1)
+        return _empirical_standardise(pair, mat, sigma_a, sigma_b, theta)
     if family in _SKEWED:
         u = stats.norm.cdf(z)                          # Gaussian copula uniforms
         x = _family_marginal(family, u, z)
@@ -166,16 +294,17 @@ def sample_batch(family, R, J, rho=0.0, sigma_a=1.0, sigma_b=1.0, theta=0.0,
 
 
 def contrast_skewness(family, rho=0.0, sigma_a=1.0, sigma_b=1.0, asym=True,
-                      n=400_000, seed=0):
+                      n=400_000, seed=0, matrix=None):
     """Standardised third moment of ``D = L_A - L_B`` for a family/rho cell.
 
     This is the x-axis of the P3-T4 figure ("Type I error vs skewness of D_j"),
     so it has to be reported per cell rather than assumed. Estimated once by a
     large independent draw; its own MCSE is ``~sqrt(6/n)``.
     """
+    if family == "empirical" and matrix is None:
+        raise ValueError("empirical family needs its loss matrix to report skewness")
     b = sample_batch(family, 1, n, rho=rho, sigma_a=sigma_a, sigma_b=sigma_b,
-                     theta=0.0, master_seed=seed, asym=asym,
-                     matrix=None if family != "empirical" else np.zeros((2, 2)))
+                     theta=0.0, master_seed=seed, asym=asym, matrix=matrix)
     d = b[0, :, 0] - b[0, :, 1]
     d = d - d.mean()
     s = d.std()

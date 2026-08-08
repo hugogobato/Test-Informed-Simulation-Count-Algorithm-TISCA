@@ -48,10 +48,16 @@ code(textwrap.dedent("""\
     # Clone it when necessary, then generate the mechanical coded CSV if it is
     # not already present. No manual file upload or cell edit is required.
     REPO_URL = "https://github.com/hugogobato/Test-Informed-Simulation-Count-Algorithm-TISCA.git"
-    REPO_DIR = "/content/Test-Informed-Simulation-Count-Algorithm-TISCA"
-    if not os.path.isdir(os.path.join(REPO_DIR, "experiments", "E4_bibliometrics")):
-        subprocess.run(["git", "clone", "--depth", "1", REPO_URL, REPO_DIR], check=True)
-    REPO_ROOT = REPO_DIR
+    # Prefer a local checkout when there is one, so the notebook also runs from a
+    # clone on a workstation; fall back to cloning into /content on Colab.
+    _CANDS = [os.path.abspath(os.path.join(os.getcwd(), "..")), os.getcwd(),
+              "/content/Test-Informed-Simulation-Count-Algorithm-TISCA"]
+    REPO_ROOT = next((d for d in _CANDS
+                      if os.path.isdir(os.path.join(d, "experiments", "E4_bibliometrics"))),
+                     None)
+    if REPO_ROOT is None:
+        REPO_ROOT = "/content/Test-Informed-Simulation-Count-Algorithm-TISCA"
+        subprocess.run(["git", "clone", "--depth", "1", REPO_URL, REPO_ROOT], check=True)
     try:
         import openpyxl  # noqa: F401
     except ImportError:
@@ -59,8 +65,16 @@ code(textwrap.dedent("""\
 
     CODE_SCRIPT = os.path.join(REPO_ROOT, "experiments", "E4_bibliometrics",
                                "code_bibliometrics.py")
+    VENUE_SCRIPT = os.path.join(REPO_ROOT, "experiments", "E4_bibliometrics",
+                                "classify_venues.py")
     CSV_PATH = os.path.join(REPO_ROOT, "results", "E4", "bibliometric_coded.csv")
+    VENUE_PATH = os.path.join(REPO_ROOT, "results", "E4", "venue_openaccess.csv")
     if not os.path.exists(CSV_PATH):
+        subprocess.run([sys.executable, CODE_SCRIPT], cwd=REPO_ROOT, check=True)
+    if not os.path.exists(VENUE_PATH):
+        # DOAJ lookups are cached in results/E4/doaj_cache.json, so this only hits
+        # the network the first time; `--offline` restricts it to the cache.
+        subprocess.run([sys.executable, VENUE_SCRIPT], cwd=REPO_ROOT, check=True)
         subprocess.run([sys.executable, CODE_SCRIPT], cwd=REPO_ROOT, check=True)
     assert os.path.exists(CSV_PATH), "E4 coding script did not create bibliometric_coded.csv"
     print("[PASS] coded bibliometric data:", CSV_PATH)
@@ -171,25 +185,54 @@ code(textwrap.dedent("""\
     """))
 
 md(textwrap.dedent("""\
-    #### Stratification by publisher type and the journal-OA split
+    #### Stratification by publisher type and the open-access split
 
-    `@misc` (preprint) versus formally published, and - for the journal subset
-    that the mechanical coder flags REVIEW_REQUIRED - the gold-OA / hybrid /
-    subscription judgement is a journal-policy fact to be confirmed in the reading
-    pass. The code below reports the mechanically derivable split (preprint vs
-    conference vs journal-flagged) and leaves the OA subtype as an explicit
-    REVIEW_REQUIRED count. Small-cell caveat: any stratum below ~5 papers is not
-    interpreted.
+    The publisher type comes from `experiments/E4_bibliometrics/classify_venues.py`,
+    which resolves every journal venue against **DOAJ membership**: DOAJ lists only
+    fully open-access journals and records whether an APC is charged, so `gold-OA`
+    and `diamond-OA` are separable and, more importantly, *checkable by a reader*.
+    Journals absent from DOAJ are reported as one `hybrid/subscription` stratum.
+    Hybrid and pure subscription are deliberately not split: there is no comparable
+    public register of hybrid status, and every commercial and society publisher in
+    this sample operates some open-access option, so the split would be both
+    unverifiable and uninformative.
+
+    `publisher_family` carries the orthogonal, fully mechanical split (commercial /
+    society / university-press / conference / preprint-server), which is the more
+    robust axis for stratification.
+
+    **Small-cell caveat, and it binds here:** only six of the analysed papers are in
+    a fully open-access venue. Any statement comparing J across the OA boundary is
+    descriptive at best, and is reported with its cell count attached.
     """))
 
 code(textwrap.dedent("""\
+    # The frame is read with keep_default_na=False, so J_numeric arrives as text;
+    # coerce once here rather than relying on a dtype set elsewhere.
+    dfA = dfA.assign(J_num=pd.to_numeric(dfA["J_numeric"], errors="coerce"))
     strata = dfA["publisher_type"].value_counts()
-    print("Mechanically-derivable publisher-type split (analysed, N = %d):" % N_A)
+    print("Publisher-type split (analysed, N = %d), DOAJ-sourced:" % N_A)
     print(strata.to_string())
-    journal_flagged = int((dfA["publisher_type"] == "journal-UNCLASSIFIED-OA").sum())
-    print("\\nJournal entries awaiting the gold-OA/hybrid/subscription reading pass:",
-          journal_flagged)
-    print("Small-cell caveat: strata with < 5 papers are not interpreted.")
+
+    unresolved = int((dfA["publisher_type"].astype(str)
+                      .str.contains("UNCLASSIFIED|UNRESOLVED|REVIEW")).sum())
+    print("\\nVenues still unresolved:", unresolved)
+
+    print("\\nJ by publisher type (median, and count so small cells are visible):")
+    by_type = dfA.groupby("publisher_type")["J_num"].agg(["count", "median", "mean"])
+    print(by_type.round(1).to_string())
+
+    print("\\nJ by publisher family:")
+    by_fam = dfA.groupby("publisher_family")["J_num"].agg(["count", "median", "mean"])
+    print(by_fam.round(1).to_string())
+
+    oa = dfA.groupby("is_open_access")["J_num"].agg(["count", "median", "mean"])
+    print("\\nFully open access (1) versus everything else (0):")
+    print(oa.round(1).to_string())
+    n_oa = int(dfA["is_open_access"].sum())
+    print(f"\\nSmall-cell caveat: strata with < 5 papers are not interpreted; the "
+          f"fully-open-access stratum holds {n_oa} papers and is reported as "
+          f"descriptive only.")
     """))
 
 code(textwrap.dedent("""\

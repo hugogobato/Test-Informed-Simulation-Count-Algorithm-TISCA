@@ -204,3 +204,140 @@ def test_solve_J_bisection_matches_brute_force():
         assert m1_power(j, 0.5, s, 0.05) >= 0.80
         if j > 4:
             assert m1_power(j - 1, 0.5, s, 0.05) < 0.80
+
+
+# --------------------------------------------------------------------------- #
+# Regression tests for the empirical family (P3-T2 defect, found 2026-08-06).   #
+# --------------------------------------------------------------------------- #
+
+def _synthetic_loss_matrix(m=500, seed=11):
+    """A correlated, right-skewed (M, 2) matrix standing in for the real one.
+
+    Built rather than loaded so the test is hermetic, but it reproduces the
+    features that matter: positive dependence, unequal marginal sds, a non-zero
+    mean contrast, and a strongly skewed D.
+    """
+    rng = np.random.default_rng(seed)
+    z = rng.multivariate_normal([0, 0], [[1, 0.6], [0.6, 1]], size=m)
+    a = 9.0 + 2.2 * np.exp(0.35 * z[:, 0])
+    b = 11.2 + 3.2 * np.exp(0.35 * z[:, 1])
+    return np.column_stack([a, b])
+
+
+def test_empirical_families_are_not_inert():
+    """theta must move E[D] and the empirical null must actually be null.
+
+    Regression for the v1 branch ``return matrix[idx]``, which ignored theta,
+    rho, sigma_a and sigma_b outright. Because the real matrix carries
+    E[D] = -2.20, its ``theta = 0`` cells were not nulls: Module A reported a
+    Type I error of 1.000 for D1-D5 and 0.948 for the oracle D6, and its five
+    rho levels were exact duplicates of each other.
+    """
+    from tisca.outermc import families
+    mat = _synthetic_loss_matrix()
+    assert abs(np.mean(mat[:, 0] - mat[:, 1])) > 1.0, "fixture must carry a real effect"
+
+    for fam, rho in [("empirical", None), ("empirical_copula", 0.3)]:
+        for theta in (0.0, 0.5):
+            b = families.sample_batch(fam, 1, 200_000, rho=rho, theta=theta,
+                                      matrix=mat, master_seed=1)
+            d = b[0, :, 0] - b[0, :, 1]
+            assert abs(np.mean(d) - theta) < 0.02, (fam, theta, np.mean(d))
+
+
+def test_empirical_copula_honours_rho_and_sigma_ratio():
+    """rho and the variance ratio must both change the copula variant's contrast."""
+    from tisca.outermc import families
+    mat = _synthetic_loss_matrix()
+    sds = [families.sample_batch("empirical_copula", 1, 200_000, rho=r, theta=0.0,
+                                 matrix=mat, master_seed=2)[0]
+           for r in (-0.3, 0.3, 0.9)]
+    widths = [np.std(x[:, 0] - x[:, 1], ddof=1) for x in sds]
+    assert widths[0] > widths[1] > widths[2], widths          # rho is live
+
+    wide = families.sample_batch("empirical_copula", 1, 200_000, rho=0.3, theta=0.0,
+                                 sigma_a=2.0, matrix=mat, master_seed=2)[0]
+    assert np.std(wide[:, 0] - wide[:, 1], ddof=1) > widths[1] * 1.2   # sigma_a is live
+
+
+def test_empirical_row_bootstrap_preserves_the_real_joint_shape():
+    """The bootstrap variant must keep the matrix's own skewness and dependence.
+
+    This is the realism family (g) exists to supply to the P3-T4 skewness
+    sub-study, so both are asserted against the source matrix rather than assumed.
+    """
+    from scipy import stats as _st
+
+    from tisca.outermc import families
+    mat = _synthetic_loss_matrix()
+    raw = mat[:, 0] - mat[:, 1]
+    raw_skew = float(_st.skew(raw))
+    raw_r = float(np.corrcoef(mat[:, 0], mat[:, 1])[0, 1])
+    assert abs(raw_skew) > 0.5, "fixture must be skewed for this test to bite"
+
+    b = families.sample_batch("empirical", 1, 400_000, rho=None, theta=0.0,
+                              matrix=mat, master_seed=4)[0]
+    d = b[:, 0] - b[:, 1]
+    assert float(_st.skew(d)) == pytest.approx(raw_skew, abs=0.06)
+    assert float(np.corrcoef(b[:, 0], b[:, 1])[0, 1]) == pytest.approx(raw_r, abs=0.02)
+    # ... and the real marginal variance ratio survives the common rescaling
+    assert (np.std(b[:, 0]) / np.std(b[:, 1])) == pytest.approx(
+        float(mat[:, 0].std() / mat[:, 1].std()), abs=0.02)
+
+
+def test_empirical_rejects_an_imposed_rho():
+    """A rho cannot be silently ignored: the row bootstrap refuses one."""
+    from tisca.outermc import families
+    mat = _synthetic_loss_matrix()
+    with pytest.raises(ValueError, match="row bootstrap"):
+        families.sample_batch("empirical", 1, 10, rho=0.3, matrix=mat, master_seed=0)
+    with pytest.raises(ValueError, match="requires a numeric rho"):
+        families.sample_batch("normal", 1, 10, rho=None, master_seed=0)
+    with pytest.raises(ValueError, match="loss matrix"):
+        families.sample_batch("empirical", 1, 10, rho=None, matrix=None, master_seed=0)
+
+
+def test_oracle_sigma_matches_the_family_it_plans_for():
+    """D6's 'true sigma' must be the family's sigma, not the normal formula.
+
+    The closed form ``sqrt(a^2 + b^2 - 2 rho a b)`` is exact only for the
+    bivariate normal. It was being used for all seven families, understating the
+    true sigma_D by 37-78% for ``mix`` (whose 2% catastrophic component is pure
+    added variance) and by 4-24% for the copula-transformed families at
+    rho >= 0.6, because the copula attenuates the Pearson correlation relative to
+    the design's rank rho. An oracle that plans from a sigma that low under-sizes
+    J, so the reference design was reporting optimistic power and E[J] exactly
+    where the non-normal families were meant to stress it.
+    """
+    from tisca.outermc import families
+    mat = _synthetic_loss_matrix()
+    cases = [("normal", 0.0), ("normal", 0.9), ("lognormal", 0.9), ("gamma", 0.9),
+             ("beta", 0.9), ("t3", 0.6), ("mix", 0.0), ("mix", 0.9),
+             ("empirical", None), ("empirical_copula", 0.6)]
+    for fam, rho in cases:
+        cfg = {"family": fam, "rho": rho, "sigma_a": 1.0, "sigma_b": 1.0,
+               "matrix": mat if fam.startswith("empirical") else None}
+        oracle = engine.sigma_D_true(cfg)
+        b = families.sample_batch(fam, 1, 400_000, rho=rho, theta=0.0,
+                                  matrix=cfg["matrix"], master_seed=77)
+        truth = float(np.std(b[0, :, 0] - b[0, :, 1], ddof=1))
+        assert oracle == pytest.approx(truth, rel=0.03), (fam, rho, oracle, truth)
+
+    # the normal closed form is still used, and still exact, for the normal family
+    assert engine.sigma_D_true({"family": "normal", "sigma_a": 1.0, "sigma_b": 1.0,
+                                "rho": 0.6}) == pytest.approx(np.sqrt(0.8))
+
+
+def test_empirical_families_recover_nominal_type_I_under_the_oracle():
+    """Both empirical variants must sit at 0.05 at theta = 0 with a correct oracle."""
+    R = 8000
+    mcse = np.sqrt(0.05 * 0.95 / R)
+    mat = _synthetic_loss_matrix()
+    for fam, rho in [("empirical", None), ("empirical_copula", 0.6)]:
+        c = dict(engine.DEFAULT_CONFIG)
+        c.update(design="D6", family=fam, rho=rho, theta=0.0, delta=0.5,
+                 sigma_D=None, matrix=mat, R=R, Jmax=200, fixed_J=200,
+                 alpha=0.05, seed=3)
+        s, _, _ = engine.run_e1(c)
+        assert abs(s["reject_rate"] - 0.05) <= 4 * mcse, (fam, s["reject_rate"])
+        assert abs(s["ci_cover"] - 0.95) <= 4 * mcse, (fam, s["ci_cover"])

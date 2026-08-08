@@ -20,6 +20,68 @@ bands. The shard notebooks therefore report the calibration verdict without
 blocking Round 1; incomplete checkpoints and non-converged rows still stop
 execution.
 
+## Deviation log
+
+### D1 — 2026-08-06: pilot block and pilot size (ANALYSIS_PLAN.md AMENDMENT 1)
+
+The dedicated pilot seed block (`seed_cell_master = 2`, seeds 1,000,001-1,000,050)
+was run for **one** of the four cells, and that run used a superseded `run_cell.R`:
+it reports BCF PEHE 10.92 and 95% coverage 0.759, against 9.70 and 0.970 from the
+driver that produced the confirmatory shards. The commit order confirms it —
+`notebooks/E3_DGP1_n500_pilot_shard01_seeds1000001-1000050.csv` was added in
+`44583de`, and `run_cell.R`'s BCF branch was rewritten afterwards in `ffeaa8b`.
+That pilot is therefore **not used**.
+
+The pilot is instead seeds `0…99` of the confirmatory block, with `J0` raised from
+50 to 100 on the three criteria stated in the amendment. Pilot rows are discarded
+from final inference, so the confirmatory analysis runs on 900 replications per
+cell. Because the pilot only sizes `J` and is then discarded, the deviation cannot
+bias the reported estimates or the level of the reported tests.
+
+**Disclose in the response letter.** The amendment was written after the
+confirmatory data was collected and its column means inspected.
+
+### Round 0 status
+
+**Supersession note.** The pilot CSVs on the reserved seed block that use the FULL
+171-column schema (DGP1 n = 500, DGP3 n = 500) were produced by the superseded
+`run_cell.R`. DGP3 is the clearest case: its pilot reports BCF PEHE Y1 11.55 and 95%
+coverage 0.777, against 9.97 and 0.970 in its own confirmatory shards. They are not
+used for planning (see deviation D1).
+
+### P3-T5(e) calibration gate: PASSED, 2026-08-06
+
+The gate is settled by `E3_round0_dual_bcf_pilot.ipynb`, which ran the corrected
+`stochtree::bcf` and the original authors' `library(bcf)` on the **same 50 pilot
+seeds, the same generated data and the same propensity scores**
+(`notebooks/E3_DGP1_n500_round0_dual_bcf_pilot_seeds1000001-1000050.csv`). This is a
+stronger test than the plan asked for: it validates against the original
+implementation directly, not only against the published table.
+
+| metric (DGP1, n = 500, Y1) | `library(bcf)` | corrected `stochtree::bcf` | published Table 2 | pass band |
+|---|---:|---:|---:|---|
+| PEHE | 9.727 | **9.673** | 9.63 | 9.3-10.0 ✓ |
+| tau 95% coverage | 0.9750 | **0.9725** | 0.97 | 0.95-0.98 ✓ |
+| tau 50% coverage | 0.5242 | 0.5239 | — | — |
+| 95% interval width | 44.06 | 43.69 | — | — |
+| CRPS | 5.651 | 5.629 | — | — |
+| ATE | 20.068 | 20.362 | ~20 | — |
+
+The two implementations agree to within 0.6% on PEHE and 0.3 percentage points on
+coverage, and both fall inside the published bands. **Verdict: the `stochtree`
+substitution is validated; the cold-start `num_gfr = 0` variant with the paper's
+priors and residual prior reproduces `library(bcf)`.** The confirmatory run at 1000
+replications independently confirms it (BCF PEHE Y1 9.70, coverage 0.9698).
+
+Ordering caveat to disclose: this diagnostic was completed alongside, not strictly
+before, the confirmatory shards.
+
+- [x] P3-T5(e) `stochtree::bcf` calibration gate against the published Table 2.
+- [x] P3-T5(f) — superseded in substance: the dual-BCF diagnostic compares the two
+      BCF implementations directly, which is the equivalence question that mattered.
+      `fast_bart()` is used for MVBCF in both arms, so the original
+      `fast_bart()`-vs-`mvbcf::run_mvbcf()` question is moot: `run_mvbcf` is not used.
+
 ## Pre-execution audit, 2026-08-04 (before any Colab session was spent)
 
 The driver was line-by-line diffed against the upstream `GitHub_DGP1.R` and

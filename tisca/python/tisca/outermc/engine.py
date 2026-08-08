@@ -59,11 +59,44 @@ def _merge(cfg):
     return merged
 
 
+_SIGMA_D_CACHE = {}
+_SIGMA_D_N = 1_000_000        # MCSE of the sd estimate ~ sigma/sqrt(2n) = 0.07%
+_SIGMA_D_SEED = 20260806      # fixed, so the oracle is a constant of the harness
+
+
 def sigma_D_true(cfg):
-    """Analytic paired-difference sd for the normal family:
-    sigma_D = sqrt(sigma_a^2 + sigma_b^2 - 2 rho sigma_a sigma_b)."""
-    a, b, r = cfg["sigma_a"], cfg["sigma_b"], cfg["rho"]
-    return float(np.sqrt(a * a + b * b - 2 * r * a * b))
+    """True paired-difference sd of the configured family. D6 plans from this.
+
+    Closed form for the bivariate normal, where ``sigma_D = sqrt(sigma_a^2 +
+    sigma_b^2 - 2 rho sigma_a sigma_b)`` is exact. **That formula is not valid for
+    the other six families** and using it everywhere is what made D6 a non-oracle:
+
+      * ``mix`` adds a 2% catastrophic component to method B, so its true sigma_D
+        is 1.6x to 4.6x the formula (the formula is 37-78% too small);
+      * for ``lognormal``, ``gamma``, ``beta``, ``t3`` and ``empirical`` the copula
+        transform attenuates the Pearson correlation relative to the design's rank
+        ``rho``, so the formula is 4-24% too small once ``rho >= 0.6``.
+
+    An oracle that plans from a sigma 20-78% below the truth under-sizes J, so the
+    "true sigma known" reference design was reporting optimistic power and E[J]
+    exactly where the non-normal families were supposed to stress it. For every
+    non-normal family sigma_D is therefore estimated once, to 0.07% MCSE, from a
+    dedicated large draw at a fixed seed, and cached: it is a deterministic
+    constant of the family/rho/scale cell, independent of ``theta``.
+    """
+    a, b = float(cfg["sigma_a"]), float(cfg["sigma_b"])
+    r = None if cfg["rho"] is None else float(cfg["rho"])
+    fam = cfg.get("family", "normal")
+    if fam == "normal":
+        return float(np.sqrt(a * a + b * b - 2 * r * a * b))
+    mat = cfg.get("matrix")
+    key = (fam, r, a, b, None if mat is None else hash(np.asarray(mat).tobytes()))
+    if key not in _SIGMA_D_CACHE:
+        block = _fam.sample_batch(fam, 1, _SIGMA_D_N, rho=r, sigma_a=a, sigma_b=b,
+                                  theta=0.0, matrix=mat, master_seed=_SIGMA_D_SEED)
+        d = block[0, :, 0] - block[0, :, 1]
+        _SIGMA_D_CACHE[key] = float(d.std(ddof=1))
+    return _SIGMA_D_CACHE[key]
 
 
 def _draw_block(family, R, J, rho, sigma_a, sigma_b, theta, matrix, master_seed, key):

@@ -1,0 +1,7 @@
+claim,value,pass
+every contrast met its MCSE target,max MCSE = 0.00869 vs target 0.01000,True
+estimates match the finite-sample reference within 1% of sigma^2,max |error| = 0.00270,True
+the ranking of all four forecasters is recovered exactly,"estimated ['AR(1)', 'AR(2)', 'naive', 'mean']",True
+both practically inferior methods are rejected at the margin,"naive p = 0.00e+00, mean p = 0.00e+00",True
+the practically negligible difference is NOT claimed as important,AR(1) vs AR(2): two-sided p = 1.54e-24 (significant) but minimum-effect p = 1.000 (not important),True
+the MCS retains only models close to the best,['AR(1)'],True

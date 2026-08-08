@@ -1,0 +1,162 @@
+{
+ "bayesian analysis": {
+  "apc_charged": false,
+  "doaj_title": "Bayesian Analysis",
+  "issn": "1931-6690",
+  "matched": true,
+  "oa_start": 2006,
+  "publisher": "International Society for Bayesian Analysis"
+ },
+ "bioinformatics": {
+  "matched": false,
+  "n_results": 88
+ },
+ "biometrical journal": {
+  "matched": false,
+  "n_results": 0
+ },
+ "biometrics": {
+  "matched": false,
+  "n_results": 7
+ },
+ "biometrika": {
+  "matched": false,
+  "n_results": 1
+ },
+ "computational statistics & data analysis": {
+  "matched": false,
+  "n_results": 0
+ },
+ "contemporary clinical trials": {
+  "matched": false,
+  "n_results": 1
+ },
+ "cpt pharmacometrics & systems pharmacology": {
+  "matched": false,
+  "n_results": 0
+ },
+ "econometric reviews": {
+  "matched": false,
+  "n_results": 0
+ },
+ "empirical economics": {
+  "matched": false,
+  "n_results": 5
+ },
+ "frontiers in applied mathematics and statistics": {
+  "apc_charged": true,
+  "doaj_title": "Frontiers in Applied Mathematics and Statistics",
+  "issn": "2297-4687",
+  "matched": true,
+  "oa_start": 2015,
+  "publisher": "Frontiers Media S.A."
+ },
+ "health economics": {
+  "matched": false,
+  "n_results": 85
+ },
+ "health services and outcomes research methodology": {
+  "matched": false,
+  "n_results": 0
+ },
+ "journal of applied econometrics": {
+  "matched": false,
+  "n_results": 6
+ },
+ "journal of business & economic statistics": {
+  "matched": false,
+  "n_results": 8
+ },
+ "journal of causal inference": {
+  "apc_charged": true,
+  "doaj_title": "Journal of Causal Inference",
+  "issn": "2193-3677;2193-3685",
+  "matched": true,
+  "oa_start": 2020,
+  "publisher": "De Gruyter"
+ },
+ "journal of computational and graphical statistics": {
+  "matched": false,
+  "n_results": 0
+ },
+ "journal of econometrics": {
+  "matched": false,
+  "n_results": 33
+ },
+ "journal of educational and behavioral statistics": {
+  "matched": false,
+  "n_results": 0
+ },
+ "journal of statistical research": {
+  "matched": false,
+  "n_results": 13
+ },
+ "journal of the american statistical association": {
+  "matched": false,
+  "n_results": 0
+ },
+ "journal of the royal statistical society series a statistics in society": {
+  "matched": false,
+  "n_results": 0
+ },
+ "journal of the royal statistical society series b statistical methodology": {
+  "matched": false,
+  "n_results": 0
+ },
+ "multivariate behavioral research": {
+  "matched": false,
+  "n_results": 0
+ },
+ "political analysis": {
+  "matched": false,
+  "n_results": 15
+ },
+ "proceedings of the 25th international conference on artificial intelligence and statistics": {
+  "matched": false,
+  "n_results": 0
+ },
+ "proceedings of the 40th international conference on machine learning": {
+  "matched": false,
+  "n_results": 0
+ },
+ "proceedings of the national academy of sciences": {
+  "matched": false,
+  "n_results": 1
+ },
+ "psychological methods": {
+  "matched": false,
+  "n_results": 3
+ },
+ "review of economics and statistics": {
+  "matched": false,
+  "n_results": 17
+ },
+ "sociological methods & research": {
+  "matched": false,
+  "n_results": 0
+ },
+ "statistica sinica": {
+  "matched": false,
+  "n_results": 0
+ },
+ "statistical methods in medical research": {
+  "matched": false,
+  "n_results": 0
+ },
+ "statistics in medicine": {
+  "matched": false,
+  "n_results": 1
+ },
+ "the annals of applied statistics": {
+  "matched": false,
+  "n_results": 0
+ },
+ "the annals of statistics": {
+  "matched": false,
+  "n_results": 1
+ },
+ "the international journal of biostatistics": {
+  "matched": false,
+  "n_results": 0
+ }
+}

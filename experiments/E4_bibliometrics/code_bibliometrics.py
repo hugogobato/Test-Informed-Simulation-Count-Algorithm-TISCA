@@ -96,22 +96,53 @@ def parse_bibtex_fields(bibtex):
     }
 
 
-def classify(entry):
+VENUES = os.path.join(HERE, "..", "..", "results", "E4", "venue_openaccess.csv")
+
+
+def load_venue_types(path=VENUES):
+    """Per-venue publisher type from ``classify_venues.py`` (DOAJ-sourced).
+
+    Returns ``{}`` when the table has not been built yet, in which case the
+    journal rows stay ``journal-UNCLASSIFIED-OA`` exactly as before. The lookup is
+    on the same normalised-title key the classifier writes.
+    """
+    if not os.path.exists(path):
+        return {}
+    with open(path, encoding="utf-8") as f:
+        return {r["venue_key"]: r for r in csv.DictReader(f)}
+
+
+def venue_key(venue, publisher):
+    def norm(t):
+        t = (t or "").replace("\\&", "&").replace("&amp;", "&")
+        t = re.sub(r"[^a-z0-9&]+", " ", t.lower())
+        return re.sub(r"\s+", " ", t).strip()
+    return norm(venue) or f"__novenue__{norm(publisher)}"
+
+
+def classify(entry, venue_types=None):
     et = entry["entry_type"]
+    hit = (venue_types or {}).get(venue_key(entry["venue"], entry["publisher"]))
+    if hit and hit["publisher_type"] != "UNRESOLVED":
+        # The DOAJ-backed table supersedes the entry-type heuristic wherever it has
+        # a verdict: it also corrects proceedings published under an @article entry
+        # type (AAAI) and separates book chapters from conference papers.
+        return {"publisher_type": hit["publisher_type"],
+                "publisher_family": hit["publisher_family"],
+                "peer_reviewed": "N" if hit["publisher_type"] == "preprint" else "Y",
+                "publisher_type_source": hit["source"],
+                "doaj_listed": hit["doaj_listed"]}
     if et == "misc":
-        return {"publisher_type": "preprint", "peer_reviewed": "N",
-                "staged_publisher_type": "preprint"}
-    if et in ("inproceedings", "incollection", "conference"):
-        return {"publisher_type": "conference", "peer_reviewed": "Y",
-                "staged_publisher_type": "conference"}
+        return {"publisher_type": "preprint", "peer_reviewed": "N"}
+    if et in ("inproceedings", "conference"):
+        return {"publisher_type": "conference", "peer_reviewed": "Y"}
+    if et in ("incollection", "book", "inbook"):
+        return {"publisher_type": "book-chapter", "peer_reviewed": "Y"}
     if et == "article":
-        return {"publisher_type": "journal-UNCLASSIFIED-OA", "peer_reviewed": "Y",
-                "staged_publisher_type": "journal-REVIEW_REQUIRED"}
-    if et in ("book", "inbook", "techreport", "phdthesis"):
-        return {"publisher_type": "other-formal", "peer_reviewed": "Y",
-                "staged_publisher_type": "other-formal-REVIEW_REQUIRED"}
-    return {"publisher_type": "unknown", "peer_reviewed": "REVIEW_REQUIRED",
-            "staged_publisher_type": "REVIEW_REQUIRED"}
+        return {"publisher_type": "journal-UNCLASSIFIED-OA", "peer_reviewed": "Y"}
+    if et in ("techreport", "phdthesis"):
+        return {"publisher_type": "working-paper", "peer_reviewed": "N"}
+    return {"publisher_type": "unknown", "peer_reviewed": "REVIEW_REQUIRED"}
 
 
 def to_numeric_j(j_verbatim):
@@ -130,10 +161,11 @@ def to_numeric_j(j_verbatim):
 def main():
     rows = load_rows(SRC)
     os.makedirs(os.path.dirname(OUT), exist_ok=True)
+    venue_types = load_venue_types()
     cols = [
         "paper_id", "bibtex", "entry_type", "venue", "publisher", "year",
-        "peer_reviewed", "publisher_type", "publisher_type_gold_OA",
-        "publisher_type_hybrid", "publisher_type_subscription",
+        "peer_reviewed", "publisher_type", "publisher_family",
+        "publisher_type_source", "doaj_listed", "is_open_access",
         "J_verbatim", "J_numeric", "J_report_reported", "J_coding_rule",
         "n_scenarios", "J_is_outer_replication", "confounded_with",
         "justification_given", "justification_quote", "justification_type",
@@ -142,7 +174,7 @@ def main():
     recs = []
     for bidx, (bibtex, j_verbatim) in enumerate(rows):
         entry = parse_bibtex_fields(bibtex or "")
-        cls = classify(entry)
+        cls = classify(entry, venue_types)
         j_num = to_numeric_j(j_verbatim)
         arxiv = 1 if entry["entry_type"] == "misc" else 0
         recs.append({
@@ -154,9 +186,10 @@ def main():
             "year": entry["year"],
             "peer_reviewed": cls["peer_reviewed"],
             "publisher_type": cls["publisher_type"],
-            "publisher_type_gold_OA": "REVIEW_REQUIRED",
-            "publisher_type_hybrid": "REVIEW_REQUIRED",
-            "publisher_type_subscription": "REVIEW_REQUIRED",
+            "publisher_family": cls.get("publisher_family", "REVIEW_REQUIRED"),
+            "publisher_type_source": cls.get("publisher_type_source", "entry type only"),
+            "doaj_listed": cls.get("doaj_listed", ""),
+            "is_open_access": 1 if cls["publisher_type"] in ("gold-OA", "diamond-OA") else 0,
             "J_verbatim": "" if j_verbatim is None else str(j_verbatim),
             "J_numeric": "" if j_num is None else j_num,
             "J_report_reported": 1 if j_num is not None else 0,
