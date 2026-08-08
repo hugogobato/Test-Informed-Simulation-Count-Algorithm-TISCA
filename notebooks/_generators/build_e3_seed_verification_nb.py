@@ -122,7 +122,11 @@ def run_seeds(dgp, n, s_start, s_end, out_name, cores=1, mode="confirmatory"):
     cmd = ["Rscript", "/content/e3/run_cell.R", str(dgp), str(n),
            str(s_start), str(s_end), "--out", out,
            "--cores", str(cores), "--mode", mode]
-    env = dict(os.environ, TISCA_MVBCF_CPP="/content/e3/MVBCF_Code.cpp")
+    # The bundle is restored outside R's default library search path.  Pass it
+    # explicitly to every driver invocation, just as the shard notebooks do.
+    env = dict(os.environ)
+    env["R_LIBS"] = LIBDIR + ":" + env.get("R_LIBS", "")
+    env["TISCA_MVBCF_CPP"] = "/content/e3/MVBCF_Code.cpp"
     t0 = time.time()
     p = subprocess.run(cmd, capture_output=True, text=True,
                        encoding="utf-8", errors="replace", env=env)
