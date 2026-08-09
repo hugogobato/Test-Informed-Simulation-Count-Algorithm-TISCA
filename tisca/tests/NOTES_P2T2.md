@@ -56,6 +56,17 @@ The parity harness **surfaced a real R bug**: `solve_halfwidth_J` used `toleranc
 which at σ=4, h=0.2 accepted `0.2000003 > 0.2` and returned `J = 1539`; Python correctly
 returned `1540`. R tolerance is now `1e-12` (machine-scale) and returns the same `J` as Python.
 
+### Degenerate-contrast parity (P3-T7 / F9)
+
+The R port now matches the Python reference when `sigma_D = 0`. M1–M5 power
+functions use the deterministic convention (`alpha` on a null/boundary case,
+1 on a deterministic alternative, and 0 outside the M5 margin), and
+`solve_power_J()` returns the smallest admissible `J = 2` with the honest
+mode-specific achieved power while flagging `degenerate = TRUE`. The former R
+shortcut reported achieved power 1 for an identically-zero null contrast.
+The added unit tests cover all five modes; the full analytic and resampling
+parity suite passes.
+
 ### Resampling parity (Tier 2) — 10/10 checks PASS
 Studentized paired bootstrap p-values (3), MCS kept sets (2), SPA + Reality Check (4),
 Romano-Wolf rejection patterns (1) — all within bootstrap MCSE.

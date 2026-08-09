@@ -31,6 +31,7 @@ Outputs under ``results/E3``:
     family_inference.csv      Romano-Wolf adjusted p, with Bonferroni and Holm alongside
     coverage_calibration.csv  the C7 calibration family, |cov - 0.95|
     mcs_pehe.csv              Model Confidence Set over the four models on PEHE
+    mcs_crps.csv              Model Confidence Set over the four models on CRPS
     e3_summary.md             the numbers in report order
 """
 
@@ -204,17 +205,25 @@ def test_cell(dgp: int, n: int, conf: pd.DataFrame):
 
 
 def coverage_cell(dgp: int, n: int, conf: pd.DataFrame):
-    """C7, secondary family: calibration framing |cov - 0.95|, never 'higher is better'."""
+    """C7, secondary family: calibration after averaging, never 'higher is better'.
+
+    Calibration is the deviation of the across-replication mean coverage from
+    its nominal target. Averaging ``abs(cov_j - nominal)`` instead scores
+    replication noise and is not the estimand in ``docs/estimand_table.md``.
+    The paired p-value is retained only for raw-coverage equality.
+    """
     out = []
     for outcome in (1, 2):
-        mv = np.abs(conf[f"mvbcf_cov95{outcome}"].to_numpy(float) - 0.95)
+        mv_cov = conf[f"mvbcf_cov95{outcome}"].to_numpy(float)
         for bench in ("bcf", "bart", "mvbart"):
-            bm = np.abs(conf[f"{bench}_cov95{outcome}"].to_numpy(float) - 0.95)
-            res = inference.paired_t(mv - bm, alternative="two-sided")
+            bm_cov = conf[f"{bench}_cov95{outcome}"].to_numpy(float)
+            res = inference.paired_t(mv_cov - bm_cov, alternative="two-sided")
             out.append(dict(
                 dgp=dgp, n=n, outcome=outcome, benchmark=bench,
-                mvbcf_mean_abs_dev=float(mv.mean()),
-                benchmark_mean_abs_dev=float(bm.mean()),
+                mvbcf_mean_coverage=float(mv_cov.mean()),
+                benchmark_mean_coverage=float(bm_cov.mean()),
+                mvbcf_mean_abs_dev=float(abs(mv_cov.mean() - 0.95)),
+                benchmark_mean_abs_dev=float(abs(bm_cov.mean() - 0.95)),
                 estimate=res["estimate"], mcse=res["mcse"], p_value=res["p_value"],
                 mvbcf_mean_width=float(conf[f"mvbcf_wid95{outcome}"].mean()),
                 benchmark_mean_width=float(conf[f"{bench}_wid95{outcome}"].mean())))
@@ -222,13 +231,7 @@ def coverage_cell(dgp: int, n: int, conf: pd.DataFrame):
 
 
 def mcs_cell(dgp: int, n: int, conf: pd.DataFrame):
-    """MCS over the four models on PEHE. An inference layer, never a stopping rule.
-
-    The plan also asks for an interval-score MCS. ``run_cell.R`` records only the
-    per-replication mean coverage and mean width, not the per-observation interval
-    score, so that layer is NOT reconstructible from the committed shards and is
-    reported as unavailable rather than approximated from coverage and width.
-    """
+    """MCS over the four models on PEHE, an inference layer, never a stopping rule."""
     out = []
     for outcome in (1, 2):
         loss = np.column_stack([conf[f"{m}_pehe{outcome}"].to_numpy(float)
@@ -238,6 +241,27 @@ def mcs_cell(dgp: int, n: int, conf: pd.DataFrame):
         for i, m in enumerate(MODELS):
             out.append(dict(dgp=dgp, n=n, outcome=outcome, model=m,
                             mean_pehe=float(loss[:, i].mean()),
+                            in_mcs_90=int(m in keep)))
+    return out
+
+
+def mcs_crps_cell(dgp: int, n: int, conf: pd.DataFrame):
+    """MCS over the four models on the stored per-replication CRPS loss.
+
+    CRPS is a proper scoring rule and is the pre-registered fallback preferred
+    in ``REVISION_PLAN.md`` when an interval-score MCS cannot be reconstructed.
+    ``run_cell.R`` stores one CRPS value per model, outcome, and replication, so
+    this analysis needs no model refits or additional simulation.
+    """
+    out = []
+    for outcome in (1, 2):
+        loss = np.column_stack([conf[f"{m}_crps{outcome}"].to_numpy(float)
+                                for m in MODELS])
+        res = _mcs.mcs(loss, alpha=0.10, B=RW_B, seed=RW_SEED, model_names=MODELS)
+        keep = set(res["included"])
+        for i, m in enumerate(MODELS):
+            out.append(dict(dgp=dgp, n=n, outcome=outcome, model=m,
+                            mean_crps=float(loss[:, i].mean()),
                             in_mcs_90=int(m in keep)))
     return out
 
@@ -256,8 +280,8 @@ def main(argv=None):
     args = ap.parse_args(argv)
 
     os.makedirs(args.results_dir, exist_ok=True)
-    plan_rows, contrast_rows, family_rows, cov_rows, mcs_rows, sens_rows = (
-        [], [], [], [], [], [])
+    plan_rows, contrast_rows, family_rows, cov_rows, mcs_rows, mcs_crps_rows, sens_rows = (
+        [], [], [], [], [], [], [])
     sigma_frames = []
 
     for dgp, n in CELLS:
@@ -296,6 +320,7 @@ def main(argv=None):
         cov_rows += coverage_cell(dgp, n, conf)
         if not args.skip_mcs:
             mcs_rows += mcs_cell(dgp, n, conf)
+            mcs_crps_rows += mcs_crps_cell(dgp, n, conf)
 
     def write(name, rows):
         frame = rows if isinstance(rows, pd.DataFrame) else pd.DataFrame(rows)
@@ -312,6 +337,7 @@ def main(argv=None):
     write("coverage_calibration.csv", cov_rows)
     if mcs_rows:
         write("mcs_pehe.csv", mcs_rows)
+        write("mcs_crps.csv", mcs_crps_rows)
 
     lines = [
         "# E3 confirmatory analysis (ANALYSIS_PLAN.md AMENDMENT 1)",
@@ -340,9 +366,11 @@ def main(argv=None):
                 "p_holm"]].to_string(index=False),
         "",
         "Note: the interval-score MCS layer of plan section 3 is not reconstructible "
-        "from the committed shards -- run_cell.R records mean coverage and mean width "
-        "per replication, not the per-observation interval score -- so only the PEHE "
-        "MCS is reported.",
+        "from the committed shards: run_cell.R records mean coverage and mean width "
+        "per replication, not the per-observation interval score. It is therefore not "
+        "approximated from those summaries. CRPS is retained per replication and is "
+        "reported as the proper-scoring-rule MCS substitute (mcs_crps.csv), alongside "
+        "the PEHE MCS (mcs_pehe.csv); no E3 model fits were rerun.",
     ]
     summary = os.path.join(args.results_dir, "e3_summary.md")
     with open(summary, "w", encoding="utf-8") as f:

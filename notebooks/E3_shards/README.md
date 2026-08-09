@@ -34,6 +34,17 @@ replication, including its `replication_seconds`, to a CSV under
 `/content/TISCA_E3`; the final cell includes the `google.colab.files.download`
 fallback.
 
+## Superseded for the uncertainty analysis by `notebooks/E3_shards_v2/`
+
+These shards record mean credible-interval width and mean coverage but not the
+miss distances, so the Winkler interval score cannot be reconstructed from them.
+`notebooks/E3_shards_v2/` reruns the 33 confirmatory shards with
+`run_cell_v2.R`, which adds that score (schema `e3-v2.0`). The v2 driver draws no
+random numbers this one did not, so every column below must reproduce exactly;
+the v2 notebooks check that against these CSVs seed by seed. The files here stay
+as the record of the first campaign and as the parity baseline. Nothing in this
+directory should be regenerated or overwritten.
+
 ## Status: execution is complete; the Round 0 pilots are superseded
 
 All four cells (DGP1/2/3 at n = 500, DGP1 at n = 100) hold a complete

@@ -1,0 +1,14 @@
+analysis_set,variable,category,count,denominator,percentage,wilson_95_low,wilson_95_high
+accessible numeric-J census,justification_class,explicit,0,17,0.0,0.0,18.4324
+accessible numeric-J census,justification_class,implicit_or_convention,0,17,0.0,0.0,18.4324
+accessible numeric-J census,justification_class,unjustified,16,17,94.1176,73.0175,98.954
+accessible numeric-J census,justification_class,unclear_report,1,17,5.8824,1.046,26.9825
+accessible numeric-J census,justification_given,yes,0,17,0.0,0.0,18.4324
+accessible numeric-J census,justification_given,no,16,17,94.1176,73.0175,98.954
+accessible numeric-J census,justification_given,unclear,1,17,5.8824,1.046,26.9825
+accessible numeric-J census,sensitivity_to_J,yes,0,17,0.0,0.0,18.4324
+accessible numeric-J census,sensitivity_to_J,no,16,17,94.1176,73.0175,98.954
+accessible numeric-J census,sensitivity_to_J,unclear,1,17,5.8824,1.046,26.9825
+all screened corpus,eligibility_status,coded_accessible_numeric_J,17,100,17.0,10.8935,25.5482
+all screened corpus,eligibility_status,not_coded_inaccessible,82,100,82.0,73.3325,88.2999
+all screened corpus,eligibility_status,not_applicable_J_not_reported,1,100,1.0,0.1767,5.4488

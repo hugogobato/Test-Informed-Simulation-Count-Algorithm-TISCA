@@ -105,6 +105,24 @@ test_that("degenerate s_D = 0 terminates without an infinite loop (P3-T7)", {
   r <- solve_power_J("M1", 0, 0, 0.05, 0.80)
   expect_true(isTRUE(r$degenerate))
   expect_true(is.finite(r$J))
+  # The planned power must remain honest: an identically-zero contrast under
+  # the null is not a 100%-powered comparison. This is the R/Python parity
+  # repair documented in docs/phase3_findings.md (F9/P3-T7).
+  expect_equal(r$J, 2L)
+  expect_equal(r$achieved_power, 0.05)
+  expect_equal(power("M1", 10, 0, 0, 0.05), 0.05)
+  expect_equal(power("M1", 10, 0.5, 0, 0.05), 1)
+  expect_equal(power("M2", 10, 0, 0, 0.05), 0.05)
+  expect_equal(power("M2", 10, -0.5, 0, 0.05), 1)
+})
+
+test_that("all degenerate mode branches agree with the Python reference", {
+  expect_equal(power("M3", 10, -0.5, 0, 0.05, 0.5), 0.05)
+  expect_equal(power("M3", 10, -1.0, 0, 0.05, 0.5), 1)
+  expect_equal(power("M4", 10, 0.5, 0, 0.05, 0.5), 0.05)
+  expect_equal(power("M4", 10, 0.0, 0, 0.05, 0.5), 1)
+  expect_equal(power("M5", 10, 0.0, 0, 0.05, 0.5), 1)
+  expect_equal(power("M5", 10, 0.5, 0, 0.05, 0.5), 0.05)
 })
 
 test_that("MCSE and half-width solvers respect their monotone forms", {

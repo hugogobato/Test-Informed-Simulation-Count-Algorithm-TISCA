@@ -68,4 +68,4 @@ dgp  n
    1 100       C5          0.000 1.356663e-140 1.356663e-140
    1 100       C6          0.000 2.787045e-124 2.322537e-124
 
-Note: the interval-score MCS layer of plan section 3 is not reconstructible from the committed shards -- run_cell.R records mean coverage and mean width per replication, not the per-observation interval score -- so only the PEHE MCS is reported.
+Note: the interval-score MCS layer of plan section 3 is not reconstructible from the committed shards: run_cell.R records mean coverage and mean width per replication, not the per-observation interval score. It is therefore not approximated from those summaries. CRPS is retained per replication and is reported as the proper-scoring-rule MCS substitute (mcs_crps.csv), alongside the PEHE MCS (mcs_pehe.csv); no E3 model fits were rerun.

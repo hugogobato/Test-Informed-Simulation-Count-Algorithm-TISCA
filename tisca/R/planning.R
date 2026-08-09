@@ -38,6 +38,13 @@ pt_dncp <- function(q, df, ncp = 0, lower.tail = TRUE) {
 #' @return power in [0,1]
 power_m1 <- function(J, delta, sigma_D, alpha) {
   if (length(J) == 0) return(numeric(0))
+  if (sigma_D == 0) {
+    # A zero-variance contrast is deterministic.  At delta = 0 the statistic
+    # is 0/0 and the test never rejects; away from the null the deterministic
+    # alternative is detected with certainty.  This is the R counterpart of
+    # planning.py::power_M1 and prevents NaN from leaking into the solver.
+    return(ifelse(delta != 0, 1, alpha))
+  }
   crit <- stats::qt(1 - alpha / 2, J - 1)
   ncp  <- sqrt(J) * delta / sigma_D
   1 - stats::pt(crit, df = J - 1, ncp = ncp) +
@@ -52,6 +59,7 @@ power_m1 <- function(J, delta, sigma_D, alpha) {
 #' @param alpha level
 #' @return power in [0,1]
 power_m2 <- function(J, delta, sigma_D, alpha) {
+  if (sigma_D == 0) return(ifelse(delta < 0, 1, alpha))
   crit <- stats::qt(alpha, J - 1)
   ncp  <- sqrt(J) * delta / sigma_D
   stats::pt(crit, df = J - 1, ncp = ncp)
@@ -66,6 +74,7 @@ power_m2 <- function(J, delta, sigma_D, alpha) {
 #' @param Delta margin (must be > 0)
 #' @return power in [0,1]
 power_m3 <- function(J, delta, sigma_D, alpha, Delta) {
+  if (sigma_D == 0) return(ifelse(delta < -Delta, 1, alpha))
   crit <- stats::qt(alpha, J - 1)
   ncp  <- sqrt(J) * (delta + Delta) / sigma_D
   stats::pt(crit, df = J - 1, ncp = ncp)
@@ -80,6 +89,7 @@ power_m3 <- function(J, delta, sigma_D, alpha, Delta) {
 #' @param Delta margin (must be > 0)
 #' @return power in [0,1]
 power_m4 <- function(J, delta, sigma_D, alpha, Delta) {
+  if (sigma_D == 0) return(ifelse(delta < Delta, 1, alpha))
   crit <- stats::qt(alpha, J - 1)
   ncp  <- sqrt(J) * (delta - Delta) / sigma_D
   stats::pt(crit, df = J - 1, ncp = ncp)
@@ -109,7 +119,17 @@ power_m4 <- function(J, delta, sigma_D, alpha, Delta) {
 power_m5 <- function(J, delta, sigma_D, alpha, Delta, exact = FALSE, n_quad = 2001L) {
   alpha <- alpha[[1]]; delta <- delta[[1]]; sigma_D <- sigma_D[[1]]
   Delta <- Delta[[1]]
-  if (!(is.finite(delta) && is.finite(Delta)) || abs(delta) >= Delta) {
+  if (!(is.finite(delta) && is.finite(Delta))) {
+    return(0)
+  }
+  if (sigma_D == 0) {
+    # Inside the equivalence margin the deterministic contrast is accepted by
+    # both TOST arms.  At the boundary the limiting convention is alpha;
+    # outside the margin the planning alternative is infeasible.
+    return(ifelse(abs(delta) < Delta, 1,
+                  ifelse(abs(delta) == Delta, alpha, 0)))
+  }
+  if (abs(delta) >= Delta) {
     return(0)
   }
   if (!exact) {
@@ -248,10 +268,6 @@ solve_halfwidth_J <- function(sigma_D, h, alpha = 0.05, J_min = 2L,
 solve_power_J <- function(mode, delta, sigma_D, alpha_adj, target_power = 0.80,
                           Delta = NULL, J_min = 2L, J_max = 1e6L, ...) {
   sigma_D <- sigma_D[[1]]
-  if (!is.finite(sigma_D) || sigma_D <= 0) {
-    # degenerate s_D: deterministic contrast, all power targets achieved (spec Section 8.5)
-    return(list(J = 2L, achieved_power = 1, capped = FALSE, degenerate = TRUE))
-  }
   alpha_adj <- alpha_adj[[1]]; delta <- delta[[1]]; target_power <- target_power[[1]]
 
   # M5 genuine infeasibility: |delta| >= Delta (spec Section 1 M5, Section 8.6)
@@ -264,6 +280,18 @@ solve_power_J <- function(mode, delta, sigma_D, alpha_adj, target_power = 0.80,
     }
   }
 
+  if (!is.finite(sigma_D) || sigma_D <= 0) {
+    # Degenerate s_D: terminate at the smallest admissible test size, but
+    # retain the honest mode-specific power.  Returning achieved_power = 1 for
+    # a null contrast was the old R/Python parity defect: no amount of
+    # replication can make an identically-zero contrast detectable.  The
+    # caller reports the degenerate cell separately (spec Section 8.5).
+    p0 <- suppressWarnings(power(mode, max(J_min, 2L), delta, sigma_D,
+                                 alpha_adj, Delta, ...))
+    return(list(J = as.integer(max(J_min, 2L)), achieved_power = p0,
+                capped = FALSE, degenerate = TRUE))
+  }
+  
   j <- max(J_min, 2L)
   p <- suppressWarnings(power(mode, j, delta, sigma_D, alpha_adj, Delta, ...))
   while (j <= J_max && length(p) >= 1L && p < target_power) {

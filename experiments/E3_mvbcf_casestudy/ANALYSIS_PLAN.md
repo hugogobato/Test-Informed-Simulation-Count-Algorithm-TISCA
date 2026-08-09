@@ -107,7 +107,7 @@ plan §2.1/§2.3, reviewer IJDA #2):
 | C4 | MVBCF vs BART | PEHE Y2 | primary |
 | C5 | MVBCF vs MVBART | PEHE Y1 | primary |
 | C6 | MVBCF vs MVBART | PEHE Y2 | primary |
-| C7 | MVBCF vs BCF | 95% CATE coverage (deviation from 0.95), Y1/Y2 | secondary, calibration |
+| C7 | MVBCF vs BCF | 95% CATE coverage; deviation computed after averaging, Y1/Y2 | secondary, calibration |
 
 **Hypothesis mode:** M1, two-sided equality `H0: θ = 0` vs `H1: θ ≠ 0`, where `θ = E[D_j]`
 is the population mean paired difference. One-sample paired t on `D_j` (and, for robustness,
@@ -120,11 +120,13 @@ throughout; the plan does not pre-select a "better" direction.
 ## 2. Coverage hypothesis (calibration framing)
 
 Coverage is **not** analysed as "higher is better" (plan C6, reviewer IJDA #10). The primary
-coverage estimand is the deviation from the nominal level, `|cov_j − 0.95|`, compared between
+coverage estimand is the deviation of the across-replication mean from the nominal level,
+`|mean(cov_j) − 0.95|`, compared between
 MVBCF and each benchmark with a two-sided / minimum-effect framing and an equivalence band
 `Δ_prac` set below. Reported alongside are the 95% coverage itself (descriptive) and the
-averaged credible-interval width (sharpness). The **interval score** (Winkler) is the scalar
-uncertainty loss used in the Model Confidence Set layer, not raw coverage.
+averaged credible-interval width (sharpness). CRPS is the stored proper scoring-rule loss used
+in the Model Confidence Set layer, not raw coverage. The exact interval score remains a
+documented limitation because its unit-level endpoints were not retained.
 
 ## 3. Multiplicity procedure
 
@@ -137,10 +139,10 @@ uncertainty loss used in the Model Confidence Set layer, not raw coverage.
 - **Family-level success criterion:** conjunctive (all six primary comparisons reported with
   family-adjusted p-values; the headline is MVBCF vs BCF on PEHE). Marginal and family-level
   power are both reported, per plan §2.2/3.5.
-- **Model Confidence Set (MCS):** reported over the four models using the **interval score**
-  and (separately) PEHE as scalar losses, with the §2.3 caveats stated verbatim in the
-  manuscript. MCS is an **inference layer, not a stopping rule**; no `J` is chosen from MCS
-  cardinality.
+- **Model Confidence Set (MCS):** reported over the four models using CRPS, the stored
+  proper scoring rule, and (separately) PEHE. The exact interval score cannot be reconstructed
+  from the committed shards because unit-level interval endpoints were not retained. MCS is
+  an **inference layer, not a stopping rule**; no `J` is chosen from MCS cardinality.
 
 ## 4. Design targets
 
@@ -205,7 +207,7 @@ per cell plus:
 - paired-contrast estimates, Monte Carlo CIs and p-values (`results/E3/paired_contrasts.csv`);
 - planning table: J_precision, J_power, J_final per contrast, with the pilot `σ̂_D` (CI-inflated);
 - family inference (Romano–Wolf, Bonferroni, Holm) and the MCS;
-- calibration (deviation from 0.95, interval score) analysis;
+- calibration (deviation from 0.95 after averaging) analysis and CRPS scoring-rule MCS;
 - the `stochtree::bcf` calibration-gate comparison to McJames et al. Table 2 (P3-T5[e]).
 
 ## 8. Deviations register
@@ -238,5 +240,5 @@ replications start until this passes** (gate acceptance).
 ---
 
 _Authors of the analysis:_ H. G. Souto, F. Louzada Neto. This plan commits the analytical
-decisions; it is not a statement about the results, which have not been run yet at the time
-of writing.
+decisions and deviations; the completed results are reported in
+`results/E3/e3_summary.md` and the accompanying result tables.
