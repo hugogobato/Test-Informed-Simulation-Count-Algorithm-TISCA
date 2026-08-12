@@ -22,6 +22,13 @@ Run ``collect_shards.py`` first, then::
     python experiments/E3_mvbcf_casestudy/analyse_e3.py
     python experiments/E3_mvbcf_casestudy/analyse_e3.py --pilot-size 50   # sensitivity
 
+Since P5.5-T1 the replications are read from the schema-``e3-v2.0`` rerun in
+``results/E3/v2``, which appends the Winkler interval score to the v1 columns and
+reproduces every v1 column bit-identically (``results/E3/v1_v2_parity.json``).
+Pass ``--replications-dir results/E3`` to reproduce the pre-P5.5 analysis from the
+v1 files, which are left in place unchanged; every output except the interval-score
+tables is identical either way.
+
 Outputs under ``results/E3``:
 
     planning_table.csv        per contrast: s_D, sigma_UB, J_precision, J_power, J_final
@@ -29,9 +36,12 @@ Outputs under ``results/E3``:
     sigma_D_matrix.csv        the 6x6 pilot Sigma_D the family procedure plans from
     paired_contrasts.csv      estimate, Monte Carlo CI, then p-value (IJDA #1e order)
     family_inference.csv      Romano-Wolf adjusted p, with Bonferroni and Holm alongside
-    coverage_calibration.csv  the C7 calibration family, |cov - 0.95|
+    coverage_calibration.csv  the C7 calibration family, |cov - 0.95|, and mean width
     mcs_pehe.csv              Model Confidence Set over the four models on PEHE
     mcs_crps.csv              Model Confidence Set over the four models on CRPS
+    mcs_interval_score.csv    Model Confidence Set on the exact CATE interval score (P5.5-T1)
+    interval_score_decomposition.csv  width and non-coverage penalty per model, level, outcome
+    interval_score_contrasts.csv      paired MVBCF-minus-benchmark interval-score contrasts
     e3_summary.md             the numbers in report order
 """
 
@@ -53,6 +63,10 @@ sys.path.insert(0, os.path.join(_ROOT, "tisca", "python"))
 from tisca import inference, mcs as _mcs, multiplicity, planning, validate  # noqa: E402
 
 RESULTS = os.path.join(_ROOT, "results", "E3")
+
+#: Replications are read from the schema-``e3-v2.0`` rerun by default (P5.5-T1).
+#: ``results/E3`` still holds the v1 collection and is a valid ``--replications-dir``.
+REPLICATIONS = os.path.join(RESULTS, "v2")
 
 # ---------------------------------------------------------------------------
 # Frozen analysis constants (ANALYSIS_PLAN.md sections 1, 3, 4; not revisited here)
@@ -81,6 +95,11 @@ CONTRASTS = [
 MODELS = ["mvbcf", "bcf", "bart", "mvbart"]
 
 CELLS = [(1, 500), (2, 500), (3, 500), (1, 100)]
+
+#: Nominal interval levels stored by ``run_cell_v2.R``. 95 is the declared primary
+#: level of the C7 family; 50 is carried because calibration evidence at two levels
+#: is much harder to argue with than at one, and it cost nothing to record.
+INTERVAL_LEVELS = (95, 50)
 
 
 def sd_tau(dgp: int, outcome: int) -> float:
@@ -245,6 +264,95 @@ def mcs_cell(dgp: int, n: int, conf: pd.DataFrame):
     return out
 
 
+def has_interval_score(frame: pd.DataFrame) -> bool:
+    """True when the frame carries the schema-``e3-v2.0`` interval-score columns."""
+    return all(f"{m}_is{L}{k}" in frame.columns
+               for m in MODELS for L in INTERVAL_LEVELS for k in (1, 2))
+
+
+def mcs_interval_score_cell(dgp: int, n: int, conf: pd.DataFrame):
+    """MCS on the exact Winkler interval score (P5.5-T1, the C6/#10 primary UQ loss).
+
+    ``run_cell_v2.R`` stores, per replication, model, outcome and level, the mean
+    over test units of
+
+        IS_a(l, u; y) = (u - l) + (2/a)(l - y)1{y < l} + (2/a)(y - u)1{y > u},
+
+    which is a proper scoring rule, is scalar and lower-is-better, and refers to the
+    declared nominal level. That is what raw coverage cannot supply and what makes
+    this, rather than CRPS, the pre-registered uncertainty loss for the MCS. CRPS is
+    retained as a comparator because it scores the whole predictive distribution.
+    """
+    out = []
+    for level in INTERVAL_LEVELS:
+        for outcome in (1, 2):
+            loss = np.column_stack([conf[f"{m}_is{level}{outcome}"].to_numpy(float)
+                                    for m in MODELS])
+            res = _mcs.mcs(loss, alpha=0.10, B=RW_B, seed=RW_SEED, model_names=MODELS)
+            keep = set(res["included"])
+            for i, m in enumerate(MODELS):
+                column = loss[:, i]
+                out.append(dict(
+                    dgp=dgp, n=n, level=level, outcome=outcome, model=m,
+                    mean_interval_score=float(column.mean()),
+                    mcse_interval_score=float(column.std(ddof=1) / math.sqrt(len(column))),
+                    in_mcs_90=int(m in keep)))
+    return out
+
+
+def interval_score_decomposition_cell(dgp: int, n: int, conf: pd.DataFrame):
+    """Split the score into sharpness and miss cost, which is why it is reportable.
+
+    ``score = width + penalty`` exactly, and ``penalty / (2/a)`` is the mean distance
+    by which the interval missed the truth. Reporting the two parts alongside the
+    total is what turns "lower is better" back into a statement a reader can act on:
+    a model can lose on the score by being wide, by missing, or by both.
+    """
+    out = []
+    for level in INTERVAL_LEVELS:
+        alpha = 1.0 - level / 100.0
+        for outcome in (1, 2):
+            for m in MODELS:
+                score = conf[f"{m}_is{level}{outcome}"].to_numpy(float)
+                penalty = conf[f"{m}_pen{level}{outcome}"].to_numpy(float)
+                width = conf[f"{m}_wid{level}{outcome}"].to_numpy(float)
+                coverage = conf[f"{m}_cov{level}{outcome}"].to_numpy(float)
+                out.append(dict(
+                    dgp=dgp, n=n, level=level, outcome=outcome, model=m,
+                    mean_interval_score=float(score.mean()),
+                    mcse_interval_score=float(score.std(ddof=1) / math.sqrt(len(score))),
+                    mean_width=float(width.mean()),
+                    mean_penalty=float(penalty.mean()),
+                    penalty_share=float(penalty.mean() / score.mean()),
+                    mean_miss_distance=float(penalty.mean() / (2.0 / alpha)),
+                    mean_coverage=float(coverage.mean()),
+                    calibration_deviation=float(abs(coverage.mean() - level / 100.0)),
+                    identity_max_abs_error=float(np.max(np.abs(score - width - penalty)))))
+    return out
+
+
+def interval_score_contrasts_cell(dgp: int, n: int, conf: pd.DataFrame):
+    """Paired MVBCF-minus-benchmark contrasts on the 95% interval score.
+
+    Secondary to the PEHE family and reported with the same estimate-then-p-value
+    order. It is the contrast form of the same loss the MCS ranks, so the two
+    uncertainty-quantification statements are about one declared quantity.
+    """
+    out = []
+    for level in INTERVAL_LEVELS:
+        for outcome in (1, 2):
+            mv = conf[f"mvbcf_is{level}{outcome}"].to_numpy(float)
+            for bench in ("bcf", "bart", "mvbart"):
+                bm = conf[f"{bench}_is{level}{outcome}"].to_numpy(float)
+                res = inference.paired_t(mv - bm, alternative="two-sided")
+                out.append(dict(
+                    dgp=dgp, n=n, level=level, outcome=outcome, benchmark=bench,
+                    estimate=res["estimate"], mcse=res["mcse"],
+                    sd=res["sd"], t=res["t"], df=res["df"],
+                    p_unadjusted=res["p_value"]))
+    return out
+
+
 def mcs_crps_cell(dgp: int, n: int, conf: pd.DataFrame):
     """MCS over the four models on the stored per-replication CRPS loss.
 
@@ -269,7 +377,11 @@ def mcs_crps_cell(dgp: int, n: int, conf: pd.DataFrame):
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--results-dir", default=RESULTS)
+    ap.add_argument("--results-dir", default=RESULTS,
+                    help="where the analysis tables are written")
+    ap.add_argument("--replications-dir", default=REPLICATIONS,
+                    help="where DGP{d}_n{n}_replications.csv are read from. Defaults "
+                         "to the schema-e3-v2.0 rerun; pass results/E3 for the v1 files")
     ap.add_argument("--pilot-size", type=int, default=100,
                     help="J0 declared in AMENDMENT 1 (default 100)")
     ap.add_argument("--mcse-fraction", type=float, default=0.05,
@@ -282,10 +394,14 @@ def main(argv=None):
     os.makedirs(args.results_dir, exist_ok=True)
     plan_rows, contrast_rows, family_rows, cov_rows, mcs_rows, mcs_crps_rows, sens_rows = (
         [], [], [], [], [], [], [])
+    mcs_is_rows, is_decomp_rows, is_contrast_rows = [], [], []
     sigma_frames = []
+    schema_versions = set()
 
     for dgp, n in CELLS:
-        frame = load_cell(dgp, n, args.results_dir)
+        frame = load_cell(dgp, n, args.replications_dir)
+        schema_versions.add(str(frame["schema_version"].iloc[0])
+                            if "schema_version" in frame.columns else "e3-v1")
         pilot, conf = split(frame, args.pilot_size)
 
         rows, D_pilot = plan_cell(dgp, pilot, args.pilot_size, args.mcse_fraction)
@@ -318,9 +434,14 @@ def main(argv=None):
         contrast_rows += c_rows
         family_rows += f_rows
         cov_rows += coverage_cell(dgp, n, conf)
+        if has_interval_score(conf):
+            is_decomp_rows += interval_score_decomposition_cell(dgp, n, conf)
+            is_contrast_rows += interval_score_contrasts_cell(dgp, n, conf)
         if not args.skip_mcs:
             mcs_rows += mcs_cell(dgp, n, conf)
             mcs_crps_rows += mcs_crps_cell(dgp, n, conf)
+            if has_interval_score(conf):
+                mcs_is_rows += mcs_interval_score_cell(dgp, n, conf)
 
     def write(name, rows):
         frame = rows if isinstance(rows, pd.DataFrame) else pd.DataFrame(rows)
@@ -338,6 +459,16 @@ def main(argv=None):
     if mcs_rows:
         write("mcs_pehe.csv", mcs_rows)
         write("mcs_crps.csv", mcs_crps_rows)
+    if is_decomp_rows:
+        decomposition = write("interval_score_decomposition.csv", is_decomp_rows)
+        # score == width + penalty is an identity, not an approximation. If it ever
+        # fails the stored score is not the score this analysis claims to report.
+        worst = float(decomposition["identity_max_abs_error"].max())
+        if worst > 1e-8:
+            raise SystemExit(f"interval-score identity violated by {worst:.3e}")
+        write("interval_score_contrasts.csv", is_contrast_rows)
+    if mcs_is_rows:
+        write("mcs_interval_score.csv", mcs_is_rows)
 
     lines = [
         "# E3 confirmatory analysis (ANALYSIS_PLAN.md AMENDMENT 1)",
@@ -364,13 +495,47 @@ def main(argv=None):
         "",
         family[["dgp", "n", "contrast", "p_romano_wolf", "p_bonferroni",
                 "p_holm"]].to_string(index=False),
+    ]
+
+    if mcs_is_rows:
+        primary = pd.DataFrame(mcs_is_rows)
+        primary = primary[primary["level"] == 95]
+        decomposition = pd.DataFrame(is_decomp_rows)
+        lines += [
+            "",
+            "## Uncertainty quantification: exact 95% CATE interval score (P5.5-T1)",
+            "",
+            "Schema " + "/".join(sorted(schema_versions)) + ". The score is the "
+            "Winkler interval score averaged over test units, stored per replication "
+            "by run_cell_v2.R; score = width + non-coverage penalty exactly. The v2 "
+            "rerun reproduced every v1 column bit-identically "
+            "(results/E3/v1_v2_parity.json), so these rows describe the same campaign "
+            "as the PEHE family above.",
+            "",
+            primary[["dgp", "n", "outcome", "model", "mean_interval_score",
+                     "mcse_interval_score", "in_mcs_90"]].to_string(index=False),
+            "",
+            "### Sharpness and miss cost at the 95% level",
+            "",
+            decomposition[decomposition["level"] == 95][
+                ["dgp", "n", "outcome", "model", "mean_width", "mean_penalty",
+                 "penalty_share", "mean_coverage"]].to_string(index=False),
+        ]
+    else:
+        lines += [
+            "",
+            "Note: the loaded replications predate schema e3-v2.0 and carry no "
+            "interval-score columns, so the exact interval-score MCS is not computed "
+            "here. CRPS (mcs_crps.csv) is the documented proper-scoring-rule "
+            "substitute. Re-run with --replications-dir results/E3/v2 for the exact "
+            "score.",
+        ]
+
+    lines += [
         "",
-        "Note: the interval-score MCS layer of plan section 3 is not reconstructible "
-        "from the committed shards: run_cell.R records mean coverage and mean width "
-        "per replication, not the per-observation interval score. It is therefore not "
-        "approximated from those summaries. CRPS is retained per replication and is "
-        "reported as the proper-scoring-rule MCS substitute (mcs_crps.csv), alongside "
-        "the PEHE MCS (mcs_pehe.csv); no E3 model fits were rerun.",
+        "CRPS is retained per replication and is reported as a proper-scoring-rule "
+        "comparator (mcs_crps.csv) alongside the PEHE MCS (mcs_pehe.csv). No E3 model "
+        "fits were rerun for this analysis.",
     ]
     summary = os.path.join(args.results_dir, "e3_summary.md")
     with open(summary, "w", encoding="utf-8") as f:

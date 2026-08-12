@@ -166,8 +166,12 @@ def _welch_stats(losses: np.ndarray, J_used: np.ndarray) -> tuple[
         )
     df = np.where(np.isfinite(df) & (df > 0), df, J_used[:, None] - 1)
     tstat = np.where(np.isfinite(tstat), tstat, 0.0)
-    # Preserve the scalar D3 reporting scale so K=1 reduces to the old harness.
-    report_sd = np.sqrt((s2a[:, None] + s2b) / 2.0)
+    # The reported scale is the Welch standard error times sqrt(J), so that the
+    # interval the engine builds is the one this design's own test implies; see the
+    # note in ``designs.design_v1_welch``. The earlier average-marginal-sd scale
+    # made the K=1 case reduce to the scalar harness, but both were wrong by the
+    # same factor of sqrt(2), so the agreement was agreement on an artefact.
+    report_sd = np.sqrt(s2a[:, None] + s2b)
     return tstat, diff, report_sd, df, np.sqrt(s2a[:, None] + s2b)
 
 

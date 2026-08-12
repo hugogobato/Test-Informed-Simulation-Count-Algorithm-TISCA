@@ -315,8 +315,18 @@ def design_v1_welch(config, draws, alpha, **k):
     df_w = np.where(np.isfinite(df_w) & (df_w > 0), df_w, J - 1)
     p = 2.0 * stats.t.sf(np.abs(T), df_w)
     capped = np.where((J >= Jmax) & ~ok, 1.0, 0.0)
+    # The reported scale must be the one D3's OWN test uses, because the engine
+    # forms the interval as theta_hat +/- t s_D / sqrt(J). D3's Welch standard
+    # error is sqrt(s2A/J + s2B/J) = sqrt(s2A + s2B)/sqrt(J), so the emitted scale
+    # is sqrt(s2A + s2B). Emitting the average marginal sd sqrt((s2A + s2B)/2)
+    # instead -- as this function did -- understated the half-width by a factor of
+    # sqrt(2) and produced an interval that contradicted the design's own test: at
+    # rho = 0, where an unpaired analysis of paired rows is exactly valid and the
+    # measured level was 0.0498, the interval covered only 0.837 instead of 0.95.
+    # That artefact, and not the discarded covariance, was the source of the
+    # "D3 undercovers" reading of the earlier grid.
     return _emit(T, p, J.astype(float), meanA - meanB,
-                 np.sqrt((s2A + s2B) / 2), capped), dict(
+                 np.sqrt(s2A + s2B), capped), dict(
         pilot_reused=True, J_planned=J, plan_sigma_unpaired=plan_sig, df_welch=df_w)
 
 

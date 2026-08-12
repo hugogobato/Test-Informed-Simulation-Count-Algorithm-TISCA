@@ -29,9 +29,10 @@ Mechanical columns derived here:
                  is flagged for manual assignment (SECTION requires reading).
   is_arxiv_preprint : 1 when entry_type == @misc (the paper's v1 arxiv share)
 
-Rows whose `Number of simulations` is literally "Not mentioned" get
-`J_report_reported = 0` and are treated as screened-but-not-analysed (plan §1.5
-N_screened=100, N_analysed=99).
+The source spreadsheet's blank SurvITE count is corrected by the documented
+`MANUAL_J_OVERRIDES` map before output, so the rebuilt mechanical file contains
+100 numeric counts. Any future genuinely non-numeric spreadsheet value still
+gets `J_report_reported = 0` and remains outside the numeric-count analysis.
 
 Manual coding fields (left REVIEW_REQUIRED, to be filled by the reading pass):
   J_coding_rule, n_scenarios, J_is_outer_replication, confounded_with,
@@ -52,6 +53,13 @@ SRC = os.path.join(
     HERE, "..", "..", "legacy", "Bibliometric_Study", "Bibliometric_study.xlsx"
 )
 OUT = os.path.join(HERE, "..", "..", "results", "E4", "bibliometric_coded.csv")
+
+# The spreadsheet leaves this accessible paper's outer replication count blank.
+# The manual bibliometric correction records the five reported replications here
+# so that rebuilding the mechanical CSV cannot silently revert the correction.
+MANUAL_J_OVERRIDES = {
+    "NEURIPS2021_e0eacd98": "5",
+}
 
 
 def load_rows(path):
@@ -192,6 +200,8 @@ def main():
     for bidx, (bibtex, j_verbatim) in enumerate(rows):
         entry = parse_bibtex_fields(bibtex or "")
         cls = classify(entry, venue_types)
+        if entry["key"] in MANUAL_J_OVERRIDES:
+            j_verbatim = MANUAL_J_OVERRIDES[entry["key"]]
         j_num = to_numeric_j(j_verbatim)
         arxiv = 1 if entry["entry_type"] == "misc" else 0
         recs.append({

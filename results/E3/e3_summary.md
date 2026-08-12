@@ -68,4 +68,78 @@ dgp  n
    1 100       C5          0.000 1.356663e-140 1.356663e-140
    1 100       C6          0.000 2.787045e-124 2.322537e-124
 
-Note: the interval-score MCS layer of plan section 3 is not reconstructible from the committed shards: run_cell.R records mean coverage and mean width per replication, not the per-observation interval score. It is therefore not approximated from those summaries. CRPS is retained per replication and is reported as the proper-scoring-rule MCS substitute (mcs_crps.csv), alongside the PEHE MCS (mcs_pehe.csv); no E3 model fits were rerun.
+## Uncertainty quantification: exact 95% CATE interval score (P5.5-T1)
+
+Schema e3-v2.0. The score is the Winkler interval score averaged over test units, stored per replication by run_cell_v2.R; score = width + non-coverage penalty exactly. The v2 rerun reproduced every v1 column bit-identically (results/E3/v1_v2_parity.json), so these rows describe the same campaign as the PEHE family above.
+
+ dgp   n  outcome  model  mean_interval_score  mcse_interval_score  in_mcs_90
+   1 500        1  mvbcf            44.610466             0.390165          1
+   1 500        1    bcf            47.382933             0.315474          0
+   1 500        1   bart            58.000840             0.304146          0
+   1 500        1 mvbart            57.665159             0.278343          0
+   1 500        2  mvbcf            44.764932             0.540034          1
+   1 500        2    bcf            47.196858             0.455808          0
+   1 500        2   bart            58.310703             0.290223          0
+   1 500        2 mvbart            56.830116             0.320099          0
+   2 500        1  mvbcf           651.724590             7.053539          0
+   2 500        1    bcf           650.026878             7.015228          0
+   2 500        1   bart           453.675450             5.892193          1
+   2 500        1 mvbart           460.746398             6.082344          0
+   2 500        2  mvbcf            42.406315             0.496201          1
+   2 500        2    bcf            44.251416             0.473125          0
+   2 500        2   bart            52.642234             0.272246          0
+   2 500        2 mvbart            51.841779             0.294940          0
+   3 500        1  mvbcf            47.344172             0.426587          1
+   3 500        1    bcf            50.098393             0.389459          0
+   3 500        1   bart            60.847996             0.367347          0
+   3 500        1 mvbart            61.307789             0.386419          0
+   3 500        2  mvbcf            45.936241             0.543842          1
+   3 500        2    bcf            47.555910             0.469404          0
+   3 500        2   bart            58.351200             0.328721          0
+   3 500        2 mvbart            57.532938             0.386812          0
+   1 100        1  mvbcf            70.056850             0.846367          1
+   1 100        1    bcf            79.336659             1.686801          0
+   1 100        1   bart            89.086745             0.812712          0
+   1 100        1 mvbart           103.046760             0.589677          0
+   1 100        2  mvbcf            70.147896             1.083245          1
+   1 100        2    bcf            81.626391             1.899221          0
+   1 100        2   bart            86.488023             0.624045          0
+   1 100        2 mvbart            98.434820             0.537066          0
+
+### Sharpness and miss cost at the 95% level
+
+ dgp   n  outcome  model  mean_width  mean_penalty  penalty_share  mean_coverage
+   1 500        1  mvbcf   40.080613      4.529853       0.101542       0.964299
+   1 500        1    bcf   43.608545      3.774388       0.079657       0.970736
+   1 500        1   bart   55.671364      2.329477       0.040163       0.984143
+   1 500        1 mvbart   55.554001      2.111158       0.036611       0.984088
+   1 500        2  mvbcf   38.690837      6.074095       0.135689       0.955110
+   1 500        2    bcf   42.257916      4.938942       0.104646       0.964951
+   1 500        2   bart   55.785209      2.525494       0.043311       0.982018
+   1 500        2 mvbart   53.860590      2.969526       0.052253       0.978811
+   2 500        1  mvbcf   39.159139    612.565451       0.939915       0.076158
+   2 500        1    bcf   42.469819    607.557058       0.934665       0.088958
+   2 500        1   bart   56.382392    397.293058       0.875721       0.280797
+   2 500        1 mvbart   56.145773    404.600626       0.878142       0.271739
+   2 500        2  mvbcf   32.995579      9.410736       0.221918       0.927127
+   2 500        2    bcf   36.079346      8.172069       0.184674       0.939118
+   2 500        2   bart   49.553211      3.089024       0.058680       0.977256
+   2 500        2 mvbart   48.166703      3.675076       0.070890       0.972808
+   3 500        1  mvbcf   42.466590      4.877582       0.103024       0.964554
+   3 500        1    bcf   45.724241      4.374152       0.087311       0.970106
+   3 500        1   bart   57.972945      2.875051       0.047250       0.982384
+   3 500        1 mvbart   58.563158      2.744631       0.044768       0.982341
+   3 500        2  mvbcf   38.707277      7.228964       0.157370       0.948138
+   3 500        2    bcf   41.950460      5.605450       0.117871       0.960381
+   3 500        2   bart   55.414554      2.936647       0.050327       0.979947
+   3 500        2 mvbart   54.358297      3.174641       0.055180       0.978470
+   1 100        1  mvbcf   66.106561      3.950289       0.056387       0.980269
+   1 100        1    bcf   70.244328      9.092330       0.114604       0.964796
+   1 100        1   bart   86.654918      2.431827       0.027297       0.990177
+   1 100        1 mvbart  101.480477      1.566283       0.015200       0.993626
+   1 100        2  mvbcf   63.271111      6.876784       0.098033       0.968382
+   1 100        2    bcf   67.478361     14.148030       0.173327       0.946833
+   1 100        2   bart   83.599710      2.888314       0.033396       0.986814
+   1 100        2 mvbart   96.435951      1.998868       0.020307       0.991389
+
+CRPS is retained per replication and is reported as a proper-scoring-rule comparator (mcs_crps.csv) alongside the PEHE MCS (mcs_pehe.csv). No E3 model fits were rerun for this analysis.

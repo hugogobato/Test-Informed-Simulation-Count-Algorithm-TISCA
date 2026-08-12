@@ -1,5 +1,16 @@
 # E3 schema-`e3-v2.0` rerun
 
+> **STATUS: COMPLETE (2026-08-10).** All 33 shards were run and downloaded, and
+> every one returned the verdict `BIT_IDENTICAL`. Across 4000 seeds and 580,000
+> recorded cells the v1 and v2 campaigns agree exactly; the worst relative
+> deviation is 0 and the width audit is 0. The collected replications are in
+> `results/E3/v2/`, the audit log is `results/E3/v1_v2_parity.json`, and the
+> exact interval-score analysis is in `results/E3/mcs_interval_score.csv`,
+> `interval_score_decomposition.csv` and `interval_score_contrasts.csv`. The run
+> order and descoping guidance below are retained as the record of how the
+> campaign was planned.
+
+
 33 pre-filled Colab notebooks that rerun the confirmatory E3 campaign with
 `experiments/E3_mvbcf_casestudy/run_cell_v2.R`, plus the manifest
 `experiments/E3_mvbcf_casestudy/shard_table_v2.csv`. They are the deliverable of

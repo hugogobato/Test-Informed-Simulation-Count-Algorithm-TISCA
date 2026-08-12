@@ -11,13 +11,12 @@ that accompany the revised manuscript, together with an auditable environment
 specification. The **original v1** submission code is preserved, untouched, under
 [`legacy/`](legacy/README.md) for audit.
 
-> **Status: revision in progress.** The v2 layout, the specifications in
-> [`docs/`](docs/README.md) and the environment files are in place; the v2
-> package, the re-run experiments and the results are landing in phases. Until
-> a phase lands, its directory holds only its specification. Anything published
-> as a result of the revision will be reproducible from the committed seeds
-> under the protocol in [`docs/seed_rng_protocol.md`](docs/seed_rng_protocol.md);
-> the **v1** results in `legacy/` are not, and that is documented there.
+> **Status: revised-analysis package.** The repository contains the TISCA
+> implementation, the revised experiment specifications, the fixed-seed
+> results, and the notebooks used for the case study. The original submission
+> code remains under [`legacy/`](legacy/README.md) for audit and is not used by
+> the revised analysis. Before a public release, the repository snapshot and
+> the manuscript source must be synchronized.
 
 ## What TISCA v2 is
 
@@ -83,20 +82,19 @@ completeness (no gaps, no duplicates) when concatenated.
 
 ## Reproducibility
 
-`./run_all.sh` is the single entry point. It currently validates the repository
-skeleton and the Python package import; each experiment attaches a sub-target to
-it as that experiment lands, and the goal it is written against is that a fresh
-clone regenerates every number in the paper from the committed seeds.
+`./run_all.sh` checks the repository layout, imports the Python reference
+implementation, and runs the E1 acceptance gate. The E4 coding scripts, E3
+collection and analysis scripts, and E5 verification outputs are run through
+their experiment-specific entry points documented alongside the corresponding
+artifacts. The fixed seeds and released results permit the manuscript numbers to
+be checked without rerunning the full model-fitting campaign.
 
-Two things that are **not** yet established, and are tracked in
-[`experiments/E3_mvbcf_casestudy/CALIBRATION.md`](experiments/E3_mvbcf_casestudy/CALIBRATION.md):
-
-- whether the `stochtree::bcf` benchmark reproduces the published Table 2 of
-  McJames et al. within Monte Carlo tolerance (the calibration gate — no
-  confirmatory replication runs until it passes);
-- the seed-protocol acceptance test on the real driver.
-
-The original authors' code is linked from the paper and the methods, not copied
+The `stochtree::bcf` benchmark diagnostic is recorded in
+[`experiments/E3_mvbcf_casestudy/CALIBRATION.md`](experiments/E3_mvbcf_casestudy/CALIBRATION.md),
+and the real-driver seed checks are recorded in `results/E3/`. The case-study
+analysis is retrospective: the final pilot designation and benchmark diagnostic
+were completed alongside or after generation of the full fixed-seed block. The
+original authors' code is linked from the paper and the methods, not copied
 here.
 
 ## Citation
