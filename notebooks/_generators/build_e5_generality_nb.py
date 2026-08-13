@@ -217,14 +217,14 @@ MCS_CELL = r'''
 # AR(2) are tied and both beat naive and mean, so a correct MCS retains exactly
 # {AR(1), AR(2)} -- a checkable claim, which is the whole point of choosing a
 # problem with a known answer.
-res_mcs = mcs.mcs(L, alpha=0.15, B=4999, statistic="Tmax", seed=21, model_names=METHODS)
+res_mcs = mcs.mcs(L, alpha=0.05, B=4999, statistic="Tmax", seed=21, model_names=METHODS)
 # `table` is (m, 3) in elimination order; `table_names` labels its ROWS.
 tbl = pd.DataFrame(np.asarray(res_mcs["table"]),
                    columns=["avg_loss", "p_elimination", "p_MCS"])
 tbl.insert(0, "model", list(res_mcs["table_names"]))
 print(tbl.round(5).to_string(index=False))
 print()
-print("MCS (85%) retains :", res_mcs["included"])
+print("MCS (95%) retains :", res_mcs["included"])
 print("eliminated        :", res_mcs["excluded"])
 # What SHOULD the MCS contain? Not the asymptotic tie: at this training length
 # AR(1) is genuinely best and AR(2) is genuinely second, so with J large enough to

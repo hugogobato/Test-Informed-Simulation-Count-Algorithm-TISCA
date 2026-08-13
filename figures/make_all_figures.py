@@ -71,7 +71,7 @@ MCSE_FRACTION = 0.05
 J_MAX = 1000
 RW_B = 4999
 RW_SEED = 20260806
-MCS_ALPHA = 0.10
+MCS_ALPHA = ALPHA  # 95% MCS, the level every other interval and test in the paper uses
 
 CELLS = [(1, 500), (2, 500), (3, 500), (1, 100)]
 CONTRASTS = [
@@ -350,6 +350,10 @@ def fig_case_study_planning() -> None:
     ax.set_xlabel("pilot size $J_0$")
     ax.set_ylabel("planned $J_{final}$")
     ax.set_title("Pilot-size sensitivity")
+    # Anchor at zero. The panel's message is that the planned count barely moves
+    # with the pilot size; an autoscaled axis magnifies a spread of a few
+    # replications into a dramatic-looking curve and says the opposite.
+    ax.set_ylim(0, 60)
     ax.set_xticks(sorted(summary["J0"].unique()))
     ax.legend(frameon=False, fontsize=9)
 
@@ -700,7 +704,7 @@ def fig_mcs_paths() -> None:
     ax.set_xlim(-0.6, len(MODELS) - 0.4)
     ax.set_ylim(-0.5, len(grid) - 0.5)
     ax.invert_yaxis()
-    ax.set_title("MCS composition on PEHE (90% confidence)\n"
+    ax.set_title("MCS composition on PEHE (95% confidence)\n"
                  "in = retained, step = bootstrap elimination order "
                  "(mean PEHE in brackets)")
     # Keep the tick labels -- they say which cell and which model each box is --
@@ -740,7 +744,7 @@ def fig_interval_score() -> None:
         g = md[(md["dgp"] == dgp) & (md["n"] == n) & (md["outcome"] == out)]
         for m_i, m in enumerate(MODELS):
             r = g[g["model"] == m].iloc[0]
-            kept = bool(r["in_mcs_90"])
+            kept = bool(r["in_mcs_95"])
             ax.add_patch(plt.Rectangle((m_i - 0.45, r_i - 0.45), 0.9, 0.9,
                                        fc="#55A868" if kept else "#FFFFFF",
                                        ec="0.4"))
@@ -753,7 +757,7 @@ def fig_interval_score() -> None:
     ax.set_xlim(-0.6, len(MODELS) - 0.4)
     ax.set_ylim(-0.6, len(grid) - 0.4)
     ax.invert_yaxis()
-    ax.set_title("MCS on the exact 95% interval score\n(90% confidence; mean score shown)")
+    ax.set_title("MCS on the exact 95% interval score\n(95% confidence; mean score shown)")
     ax.grid(False)
     for spine in ax.spines.values():
         spine.set_visible(False)

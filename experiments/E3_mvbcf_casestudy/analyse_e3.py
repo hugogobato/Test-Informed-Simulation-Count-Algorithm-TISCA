@@ -82,6 +82,14 @@ DELTA_FRACTION = 0.25              # delta = 0.25 * sd(tau), plan section 4
 RW_B = 4999
 RW_SEED = 20260806
 
+#: MCS level. Set to ALPHA so the reported Model Confidence Set is a 95% set and
+#: shares its confidence level with every other interval and test in the paper.
+#: Hansen, Lunde & Nason report 90% and 75% sets, but nothing in the procedure
+#: fixes the level, and mixing 90% here with 95% everywhere else is a reporting
+#: inconsistency rather than a convention. The MCS p-value is level-free, so the
+#: CSVs carry ``p_mcs`` and any level can be checked from them without a rerun.
+MCS_ALPHA = ALPHA
+
 #: The six primary contrasts. ``outcome`` selects which ``sd(tau)`` scales delta.
 CONTRASTS = [
     ("C1", "MVBCF vs BCF, PEHE Y1", "mvbcf_pehe1", "bcf_pehe1", 1),
@@ -255,12 +263,13 @@ def mcs_cell(dgp: int, n: int, conf: pd.DataFrame):
     for outcome in (1, 2):
         loss = np.column_stack([conf[f"{m}_pehe{outcome}"].to_numpy(float)
                                 for m in MODELS])
-        res = _mcs.mcs(loss, alpha=0.10, B=RW_B, seed=RW_SEED, model_names=MODELS)
+        res = _mcs.mcs(loss, alpha=MCS_ALPHA, B=RW_B, seed=RW_SEED, model_names=MODELS)
         keep = set(res["included"])
         for i, m in enumerate(MODELS):
             out.append(dict(dgp=dgp, n=n, outcome=outcome, model=m,
                             mean_pehe=float(loss[:, i].mean()),
-                            in_mcs_90=int(m in keep)))
+                            p_mcs=float(res["p_mcs"][i]),
+                            in_mcs_95=int(m in keep)))
     return out
 
 
@@ -288,7 +297,7 @@ def mcs_interval_score_cell(dgp: int, n: int, conf: pd.DataFrame):
         for outcome in (1, 2):
             loss = np.column_stack([conf[f"{m}_is{level}{outcome}"].to_numpy(float)
                                     for m in MODELS])
-            res = _mcs.mcs(loss, alpha=0.10, B=RW_B, seed=RW_SEED, model_names=MODELS)
+            res = _mcs.mcs(loss, alpha=MCS_ALPHA, B=RW_B, seed=RW_SEED, model_names=MODELS)
             keep = set(res["included"])
             for i, m in enumerate(MODELS):
                 column = loss[:, i]
@@ -296,7 +305,8 @@ def mcs_interval_score_cell(dgp: int, n: int, conf: pd.DataFrame):
                     dgp=dgp, n=n, level=level, outcome=outcome, model=m,
                     mean_interval_score=float(column.mean()),
                     mcse_interval_score=float(column.std(ddof=1) / math.sqrt(len(column))),
-                    in_mcs_90=int(m in keep)))
+                    p_mcs=float(res["p_mcs"][i]),
+                    in_mcs_95=int(m in keep)))
     return out
 
 
@@ -365,12 +375,13 @@ def mcs_crps_cell(dgp: int, n: int, conf: pd.DataFrame):
     for outcome in (1, 2):
         loss = np.column_stack([conf[f"{m}_crps{outcome}"].to_numpy(float)
                                 for m in MODELS])
-        res = _mcs.mcs(loss, alpha=0.10, B=RW_B, seed=RW_SEED, model_names=MODELS)
+        res = _mcs.mcs(loss, alpha=MCS_ALPHA, B=RW_B, seed=RW_SEED, model_names=MODELS)
         keep = set(res["included"])
         for i, m in enumerate(MODELS):
             out.append(dict(dgp=dgp, n=n, outcome=outcome, model=m,
                             mean_crps=float(loss[:, i].mean()),
-                            in_mcs_90=int(m in keep)))
+                            p_mcs=float(res["p_mcs"][i]),
+                            in_mcs_95=int(m in keep)))
     return out
 
 
@@ -513,7 +524,7 @@ def main(argv=None):
             "as the PEHE family above.",
             "",
             primary[["dgp", "n", "outcome", "model", "mean_interval_score",
-                     "mcse_interval_score", "in_mcs_90"]].to_string(index=False),
+                     "mcse_interval_score", "p_mcs", "in_mcs_95"]].to_string(index=False),
             "",
             "### Sharpness and miss cost at the 95% level",
             "",
