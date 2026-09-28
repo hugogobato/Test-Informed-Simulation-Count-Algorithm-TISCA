@@ -88,6 +88,7 @@ PAPER_FIGURES = ["Fig1.png", "Fig2.png", "Fig3a.png", "Fig3b.png", "Fig4.png",
                  "Fig5.png", "Fig6.png", "Fig7.png", "Fig8.png", "Fig8a.png",
                  "Fig8b.png", "Fig8c.png", "Fig9.png", "Fig10.png",
                  "Fig_E3_precision_gain.png", "Fig_E4_justification.png",
+                 "Fig_E4_justification_nonarxiv.png",
                  "Fig_E6_real_loss_calibration.png"]
 
 RETURN = object()
@@ -218,6 +219,41 @@ def fig_bibliometrics() -> None:
     ax.set_xlim(0, max(values) * 1.22)
     fig.tight_layout()
     out = os.path.join(FIGURES, "Fig_E4_justification.png")
+    fig.savefig(out); plt.close()
+    print("wrote", out)
+    download(out)
+
+
+def fig_justification_nonarxiv() -> None:
+    """Fig E4b: the justification audit restricted to the non-arXiv subset.
+
+    Fig E4 reports the justification split for the full analysed corpus. This
+    companion figure repeats it on the non-arXiv stratum that Fig 3b uses, so
+    the two availability strata can be compared on the same coding. The counts
+    come from the row-level coded corpus, which carries the
+    ``is_arxiv_preprint`` flag, and the denominator is read from the subset
+    itself rather than typed here.
+    """
+    path = os.path.join(RESULTS, "E4", "bibliometric_justifications_coded.csv")
+    df = pd.read_csv(path, keep_default_na=False)
+    nonarxiv = df[(df["justification_eligible"] == "Y") &
+                  (df["is_arxiv_preprint"].astype(int) == 0)]
+    classes = ["explicit", "implicit_or_convention", "unjustified"]
+    labels = ["Explicit criterion", "Implicit or convention", "No stated reason"]
+    values = [int((nonarxiv["justification_class"] == c).sum()) for c in classes]
+    denom = len(nonarxiv)
+    fig, ax = plt.subplots(figsize=(7.2, 3.8))
+    bars = ax.barh(labels[::-1], values[::-1],
+                   color=["#C44E52", "#DD8452", "#4C72B0"])
+    ax.set_xlabel(f"Number of records (denominator = {denom})")
+    ax.set_title("Reason given for the reported outer replication count, "
+                 f"non-arXiv ($N = {denom}$)")
+    for bar, value in zip(bars, values[::-1]):
+        ax.text(value + 0.8, bar.get_y() + bar.get_height() / 2,
+                f"{value} ({100 * value / denom:.1f}%)", va="center")
+    ax.set_xlim(0, max(values) * 1.22)
+    fig.tight_layout()
+    out = os.path.join(FIGURES, "Fig_E4_justification_nonarxiv.png")
     fig.savefig(out); plt.close()
     print("wrote", out)
     download(out)
@@ -810,7 +846,8 @@ def main(argv=None) -> int:
     FIGURES = os.path.abspath(args.figures_dir)
     os.makedirs(FIGURES, exist_ok=True)
 
-    for name in ["fig_bibliometrics", "fig_precision_gain", "fig_case_study_planning",
+    for name in ["fig_bibliometrics", "fig_justification_nonarxiv",
+                 "fig_precision_gain", "fig_case_study_planning",
                  "fig_contrast_forest", "fig_operating_characteristics",
                  "fig_J_distribution", "fig_type_I_vs_skewness",
                  "fig_real_loss_calibration", "fig_mcs_paths",
